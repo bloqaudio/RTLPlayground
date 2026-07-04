@@ -2023,20 +2023,33 @@ void main(void)
 	uip_ipaddr(&uip_hostaddr, ownIP[0], ownIP[1], ownIP[2], ownIP[3]);
 	uip_ipaddr(&uip_draddr, gatewayIP[0], gatewayIP[1], gatewayIP[2], gatewayIP[3]);
 	uip_ipaddr(&uip_netmask, netmask[0], netmask[1], netmask[2], netmask[3]);
-	reg_read_m(RTL837X_REG_CHIP_UUID);
-#ifdef DEBUG
-	print_string("SoC UUID: "); print_sfr_data();
-#endif
-	uip_ethaddr.addr[0] = 0x06;  // LAA prefix
-	uip_ethaddr.addr[3] = sfr_data[0] ^ sfr_data[3];
-	uip_ethaddr.addr[4] = sfr_data[1] ^ sfr_data[3];
-	uip_ethaddr.addr[5] = sfr_data[2] ^ sfr_data[3];
-	reg_read_m(RTL837X_REG_CHIP_LOT_NO);
-#ifdef DEBUG
-	print_string(", LOT: "); print_sfr_data(); write_char(' ');
-#endif
-	uip_ethaddr.addr[1] = sfr_data[0] ^ sfr_data[2];
-	uip_ethaddr.addr[2] = sfr_data[1] ^ sfr_data[3];
+	// Factory MAC from flash if this board stores one (machine.mac_flash_offset != 0).
+	// Stock keeps 6 raw MAC bytes at 0x1FC000; RTLPlayground only uses 0-0x100000 so that
+	// region is free and survives web upgrades (they rewrite only 0-CONFIG_START). Fall back
+	// to a generated locally-administered MAC when the region is blank/invalid, or when the
+	// board defines no offset — so generic builds on other hardware are unaffected.
+	uip_ethaddr.addr[0] = 0xff;
+	if (machine.mac_flash_offset) {
+		flash_region.addr = machine.mac_flash_offset;
+		flash_region.len = FLASH_BUF_SIZE;
+		flash_read_bulk(flash_buf);
+		// accept only a real unicast, globally-administered address (reject blank/LAA/multicast/all-zero OUI)
+		if (flash_buf[0] != 0xff && !(flash_buf[0] & 0x03) && (flash_buf[0] | flash_buf[1] | flash_buf[2])) {
+			uip_ethaddr.addr[0] = flash_buf[0]; uip_ethaddr.addr[1] = flash_buf[1];
+			uip_ethaddr.addr[2] = flash_buf[2]; uip_ethaddr.addr[3] = flash_buf[3];
+			uip_ethaddr.addr[4] = flash_buf[4]; uip_ethaddr.addr[5] = flash_buf[5];
+		}
+	}
+	if (uip_ethaddr.addr[0] == 0xff) {  // no valid flash MAC -> generate locally-administered
+		reg_read_m(RTL837X_REG_CHIP_UUID);
+		uip_ethaddr.addr[0] = 0x06;  // LAA prefix
+		uip_ethaddr.addr[3] = sfr_data[0] ^ sfr_data[3];
+		uip_ethaddr.addr[4] = sfr_data[1] ^ sfr_data[3];
+		uip_ethaddr.addr[5] = sfr_data[2] ^ sfr_data[3];
+		reg_read_m(RTL837X_REG_CHIP_LOT_NO);
+		uip_ethaddr.addr[1] = sfr_data[0] ^ sfr_data[2];
+		uip_ethaddr.addr[2] = sfr_data[1] ^ sfr_data[3];
+	}
 	print_string("Setting MAC to: ");
 	print_byte(uip_ethaddr.addr[0]); write_char(':'); print_byte(uip_ethaddr.addr[1]); write_char(':');
 	print_byte(uip_ethaddr.addr[2]); write_char(':'); print_byte(uip_ethaddr.addr[3]); write_char(':');

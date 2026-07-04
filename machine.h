@@ -83,6 +83,9 @@ typedef struct machine {
 	uint32_t led_sets[4][4];
 	uint8_t led_mux_custom;
 	uint8_t led_mux[28];
+	// Flash offset of a factory-programmed 6-byte MAC (stock nvcfg). 0 = none: generate a
+	// locally-administered MAC from the chip ID instead (safe generic default for any board).
+	uint32_t mac_flash_offset;
 };
 
 typedef struct machine_runtime
