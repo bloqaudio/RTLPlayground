@@ -714,6 +714,91 @@ void port_eee_status_all(void) __banked
 }
 
 /*
+ * 802.3x flow control (pause) per port, via MAC_FORCE_MODE (0x6344 + port*4).
+ *   bit 6 = TX pause (generate), bit 7 = RX pause (obey), bit 8 = force-FC.
+ * Phase A implements the RX (obey) side plus an "auto" mode that follows
+ * auto-negotiation. TX generation is deliberately left off: enabling it safely
+ * needs the buffer watermarks configured, which is Phase B.
+ *
+ * The chip powers on with data ports at 0x194 = FORCE + RX_PAUSE, i.e. it obeys
+ * pause unconditionally regardless of what was negotiated. That is what let a
+ * link partner's stray pause frames stall forwarding; FC_AUTO / FC_OFF fix it.
+ *
+ * sfr byte layout (reg_read_m/sfr_mask_data): byte 0 = bits 0-7 (n=0), byte 1 =
+ * bits 8-15 (n=1). So bits 6/7 live in byte 0, bit 8 in byte 1.
+ */
+void port_fc_set(uint8_t port, uint8_t mode) __banked
+{
+	if (machine.is_sfp[port])  // SFP ports have no copper PHY; handled elsewhere
+		return;
+
+	reg_read_m(RTL837X_REG_MAC_FORCE_MODE + (port << 2));
+	if (mode == FC_AUTO) {
+		// Clear force-FC (bit 8): MAC follows the PHY's negotiated pause result
+		sfr_mask_data(1, 0x01, 0x00);
+	} else {
+		// Force the pause bits (force-FC bit 8 set). bit 7 = obey (RX), bit 6 = generate (TX):
+		//   FC_ON  -> RX only (0x80), FC_GEN -> RX+TX (0xC0), FC_OFF -> neither (0x00)
+		uint8_t pbits = (mode == FC_ON) ? 0x80 : (mode == FC_GEN) ? 0xC0 : 0x00;
+		sfr_mask_data(1, 0x01, 0x01);
+		sfr_mask_data(0, 0xC0, pbits);
+	}
+	reg_write_m(RTL837X_REG_MAC_FORCE_MODE + (port << 2));
+	// The MAC latches its force-mode pause config only on a real link-up (a PHY
+	// soft-reset is NOT enough - verified on HW). At boot (idle_ready==0, config
+	// replay) the ports haven't linked yet, so the write latches naturally on the
+	// first link-up - no bounce needed. Only bounce for interactive changes to an
+	// already-live port: full PHY down/up with an autoneg restart, same as
+	// `port <n> off` then `port <n> on`. NOTE: re-negotiates the port to auto speed.
+	if (idle_ready) {
+		phy_settings.port = port;
+		phy_settings.speed = PHY_OFF;
+		phy_set_speed();
+		sleep(1000);   // ~5s at SYS_TICK_HZ=200, running the main loop - matches the
+		               // proven manual `port off` / wait / `port on` sequence.
+		phy_settings.duplex = PHY_DUPLEX_BOTH;
+		phy_settings.speed = PHY_SPEED_AUTO;
+		phy_set_speed();
+	}
+
+	print_string("FC port "); print_byte(port);
+	print_string(mode == FC_AUTO ? " auto\n" :
+	             (mode == FC_GEN ? " gen (obey+generate)\n" :
+	             (mode == FC_ON ? " on (obey)\n" : " off\n")));
+}
+
+void port_fc_set_all(uint8_t mode) __banked
+{
+	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
+		port_fc_set(i, mode);
+}
+
+void port_fc_status(uint8_t port) __banked
+{
+	print_string("Port "); print_byte(port); print_string(": ");
+	if (machine.is_sfp[port]) {
+		print_string("SFP\n");
+		return;
+	}
+	reg_read_m(RTL837X_REG_MAC_FORCE_MODE + (port << 2));
+	if (!(sfr_data[2] & 0x01)) {  // bit 8 (force-FC) clear
+		print_string("auto\n");
+		return;
+	}
+	print_string("forced:");
+	if (sfr_data[3] & 0x80) print_string(" rx-pause");  // bit 7
+	if (sfr_data[3] & 0x40) print_string(" tx-pause");  // bit 6
+	if (!(sfr_data[3] & 0xC0)) print_string(" off");
+	write_char('\n');
+}
+
+void port_fc_status_all(void) __banked
+{
+	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
+		port_fc_status(i);
+}
+
+/*
  * Enable RLDP, Realtek's version of LLDP
  */
 void port_rldp_on(__xdata uint16_t p_ms)

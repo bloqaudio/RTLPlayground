@@ -143,6 +143,12 @@
 #define RTL837X_REG_CPU_TAG		0x6720
 #define RTL837X_REG_CPU_TAG_AWARE_PMASK	0x603C
 #define RTL837X_REG_MAC_FORCE_MODE	0x6344
+// 802.3x flow-control (pause) bits within MAC_FORCE_MODE, per port
+// (RTL837X_REG_MAC_FORCE_MODE + port*4). Bit map matches the RTL9300 sibling and
+// is corroborated on this chip by the bit0/1 force-link usage at rtlplayground.c.
+#define MAC_FC_TX_PAUSE_EN	0x0040	// bit 6: generate pause frames (needs watermarks; Phase B)
+#define MAC_FC_RX_PAUSE_EN	0x0080	// bit 7: obey received pause frames
+#define MAC_FC_FORCE_EN		0x0100	// bit 8: force the pause bits (clear = follow auto-negotiation)
 
 /*
  * Statistics related registers

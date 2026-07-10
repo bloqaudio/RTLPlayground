@@ -69,6 +69,15 @@ void port_eee_status_all(void) __banked;
 void port_eee_enable(__xdata uint8_t port, __xdata uint8_t speed) __banked;
 void port_eee_disable(uint8_t port) __banked;
 void port_eee_status(uint8_t port) __banked;
+// 802.3x flow-control (pause) modes for port_fc_set()
+#define FC_OFF	0	// force no pause (neither obey nor generate)
+#define FC_ON	1	// force obey received pause (RX); no generate
+#define FC_AUTO	2	// follow auto-negotiation (clear force-FC)
+#define FC_GEN	3	// force obey + generate (RX+TX); generation uses buffer watermarks
+void port_fc_set(uint8_t port, uint8_t mode) __banked;
+void port_fc_set_all(uint8_t mode) __banked;
+void port_fc_status(uint8_t port) __banked;
+void port_fc_status_all(void) __banked;
 void print_port_ingress_filter_mode(vlan_ingress_mode_t mode) __banked;
 bool port_ingress_vlan_filter_set(__xdata uint8_t port, __xdata bool enabled) __banked;
 bool port_ingress_vlan_filter_get(__xdata uint8_t port) __banked;

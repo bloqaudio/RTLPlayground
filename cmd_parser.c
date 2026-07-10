@@ -846,6 +846,48 @@ err:
 }
 
 
+/*
+ * regdump <start_hex> <count_hex> - dump <count> consecutive 32-bit registers
+ * (stride 4) starting at <start>. For scanning register neighborhoods, e.g.
+ * hunting the flow-control watermark block:  regdump 7000 40
+ */
+void parse_regdump(void)
+{
+	uint16_t reg = 0;
+	uint8_t count;
+
+	if (cmd_words_len != 3)
+		goto err;
+
+	uint8_t hs = atoi_hex(cmd_words_b[1]);
+	if (hs == 0 || hs > 2)
+		goto err;
+	reg = hexvalue[0];
+	if (hs == 2) {
+		reg <<= 8;
+		reg |= hexvalue[1];
+	}
+
+	if (atoi_hex(cmd_words_b[2]) != 1)
+		goto err;
+	count = hexvalue[0];   // 1..0xff registers
+
+	while (count--) {
+		print_short(reg);
+		print_string(": ");
+		reg_read_m(reg);
+		print_sfr_data();
+		write_char('\n');
+		reg += 4;
+	}
+	return;
+
+err:
+	print_string("usage: regdump <start_hex> <count_hex>\n\tlike: regdump 7000 40\n");
+	return;
+}
+
+
 void parse_regset(void)
 {
 	uint16_t reg = 0;
@@ -1187,6 +1229,56 @@ void parse_eee(void)
 	} else {
 		print_string("eee [on|off|status] [port] [100m|1g|2g5]\n");
 	}
+}
+
+/*
+ * 802.3x flow control:  fc [on|off|gen|auto|status] [port]
+ *   on   - force obey received pause (RX only)
+ *   gen  - force obey + generate pause (RX+TX); generation gated by buffer watermarks
+ *   off  - force no pause (neither obey nor generate)
+ *   auto - follow auto-negotiation (default)
+ * No port -> applies to all copper ports.
+ */
+void parse_fc(void)
+{
+	__xdata int8_t port = -1;
+	__xdata uint8_t mode;
+
+	// Optional port number at word 2: fc <cmd> [port]
+	if (cmd_words_len >= 3) {
+		uint8_t p = cmd_buffer[cmd_words_b[2]] - '1';
+		if (p >= 9) {
+			print_string("Illegal port\n");
+			return;
+		}
+		port = machine.phys_to_log_port[p];
+	}
+
+	if (cmd_compare(1, "status")) {
+		if (port >= 0)
+			port_fc_status(port);
+		else
+			port_fc_status_all();
+		return;
+	}
+
+	if (cmd_compare(1, "on"))
+		mode = FC_ON;
+	else if (cmd_compare(1, "off"))
+		mode = FC_OFF;
+	else if (cmd_compare(1, "gen"))
+		mode = FC_GEN;
+	else if (cmd_compare(1, "auto"))
+		mode = FC_AUTO;
+	else {
+		print_string("fc [on|off|gen|auto|status] [port]\n");
+		return;
+	}
+
+	if (port >= 0)
+		port_fc_set(port, mode);
+	else
+		port_fc_set_all(mode);
 }
 
 
@@ -1557,6 +1649,8 @@ void cmd_parser(void) __banked
 			print_gpio_status();
 		} else if (cmd_compare(0, "regget")) {
 			parse_regget();
+		} else if (cmd_compare(0, "regdump")) {
+			parse_regdump();
 		} else if (cmd_compare(0, "regset")) {
 			parse_regset();
 		} else if (cmd_compare(0, "sdsget")) {
@@ -1573,6 +1667,8 @@ void cmd_parser(void) __banked
 			parse_passwd();
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
+		} else if (cmd_compare(0, "fc")) {
+			parse_fc();
 		} else if (cmd_compare(0, "bw")) {
 			parse_bw();
 		} else if (cmd_compare(0, "version")) {

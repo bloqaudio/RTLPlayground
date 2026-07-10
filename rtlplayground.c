@@ -2098,6 +2098,11 @@ void main(void)
 	nic_setup();
 	vlan_setup();
 	port_l2_setup();
+	// Sane flow-control default: follow auto-negotiation instead of the chip's
+	// power-on 0x194 (force + unconditional pause-obey). Runs before execute_config
+	// (so a saved `fc` line can override) and before ports link up (idle_ready==0,
+	// so no bounce - the write latches on the first natural link-up).
+	port_fc_set_all(FC_AUTO);
 	igmp_setup();
 	bandwidth_setup();
 	uip_init();
