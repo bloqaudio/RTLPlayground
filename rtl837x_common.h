@@ -29,6 +29,7 @@
 
 extern __xdata volatile uint8_t sbuf_ptr;
 extern __xdata uint8_t sbuf[SBUF_SIZE];
+extern __xdata uint8_t idle_ready;   // 0 during boot/config-replay, 1 once the main loop is live
 
 // Define the command buffer size, Must be 2^x and <= 128
 #define CMD_BUF_SIZE 128
