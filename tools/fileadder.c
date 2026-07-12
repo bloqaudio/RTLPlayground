@@ -319,6 +319,14 @@ int main(int argc, char **argv)
 			data_read = replaceCalls(addr);
 			if (old_len > data_read)
 				memset(buffer + addr + data_read, 0, old_len - data_read);
+			// struct f_data.len is uint16_t on the target: a larger file
+			// would silently truncate when served
+			if (data_read > 0xFFFF) {
+				fprintf(stderr, "%s: %ld bytes exceeds the 65535-byte "
+					"limit of f_data.len — split the file\n",
+					pathbuffer, data_read);
+				exit(6);
+			}
 			addidx(in_file->d_name, addr, data_read);
 			addr += data_read;
 		}

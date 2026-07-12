@@ -701,10 +701,10 @@ void httpd_appcall(void)
 			}
 		} else {
 			dbg_string("Have entry, authenticated: "); dbg_byte(authenticated); dbg_char('\n');
-			if (!authenticated && !(f_data[entry].start == FDATA_START_login_html 
-						|| f_data[entry].start == FDATA_START_port_svg 
-						|| f_data[entry].start == FDATA_START_sfp_svg
-						|| f_data[entry].start == FDATA_START_style_css)) {
+			// login.html is fully self-contained; only it and the favicon
+			// are served without a session
+			if (!authenticated && !(f_data[entry].start == FDATA_START_login_html
+						|| f_data[entry].start == FDATA_START_favicon_ico)) {
 				send_to_login();
 				goto do_send;
 			}
