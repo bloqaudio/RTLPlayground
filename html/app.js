@@ -1256,34 +1256,67 @@ $("fwfile").addEventListener("change",function(){
 $("fwup").addEventListener("click",function(){
   if(!fwBuf)return;
   confirmModal("Upload firmware?",
-    "The image is staged to flash and applied on next reboot. Do not power off during upload.",
+    "On a good checksum the switch resets itself and applies the image during boot (the startup config is preserved). Do not power it off until it comes back.",
     function(){
       var form=new FormData();
       form.append("uploadedfile",fwBuf,fwBuf.name);
       var xhr=new XMLHttpRequest();
       var prog=$("fwprog"),st=$("fwstat");
+      var sent=false;
       prog.style.display="";prog.value=0;
       $("fwup").disabled=true;
       st.textContent="uploading…";
       xhr.upload.onprogress=function(e){if(e.lengthComputable)prog.value=100*e.loaded/e.total};
-      xhr.onload=function(){
-        if(xhr.status===200){
-          st.textContent="uploaded & staged ✓";
-          modal("Firmware staged",h("p",{text:"The switch verifies the CRC and applies the image on the next boot. Reboot now?"}),[
-            h("button",{class:"ctl",text:"Later",onclick:closeModal}),
-            h("button",{class:"ctl pri",text:"Reboot now",onclick:function(){
-              closeModal();api("/reset").catch(function(){});
-              toast("Rebooting — reconnect in ~30 s","ok");
-            }}),
-          ]);
-        }else st.textContent="upload failed: HTTP "+xhr.status;
-        $("fwup").disabled=false;
+      xhr.upload.onload=function(){sent=true;st.textContent="upload sent — switch is verifying…"};
+      /* the firmware never answers /upload: good CRC → it closes the
+       * connection and resets itself; bad CRC → it closes and stays up.
+       * Either way the request ends here or in onerror. */
+      xhr.onload=function(){fwSettle(st)};
+      xhr.onerror=function(){
+        if(!sent){st.textContent="upload failed — connection lost mid-transfer";$("fwup").disabled=false;return;}
+        fwSettle(st);
       };
-      xhr.onerror=function(){st.textContent="upload failed";$("fwup").disabled=false};
       xhr.open("POST","/upload");
       xhr.send(form);
     });
 });
+/* Tell the two silent outcomes apart by whether the switch keeps
+ * answering: a reply within the first seconds means it never rebooted
+ * (checksum rejected); going dark and coming back means the update
+ * was applied. Raw fetch, not api(): a 401 from the fresh session
+ * still counts as "the switch is back". */
+function fwSettle(st){
+  var waited=0;
+  st.textContent="switch is verifying…";
+  function probe(){
+    var ctl=("AbortController"in window)?new AbortController():null;
+    var to=setTimeout(function(){if(ctl)ctl.abort()},2500);
+    fetch("/information.json",{signal:ctl?ctl.signal:undefined,cache:"no-store"}).then(function(){
+      clearTimeout(to);
+      if(waited<=6){
+        st.textContent="✕ the switch rejected the image (bad checksum) — nothing was applied";
+        $("fwup").disabled=false;
+        return;
+      }
+      st.textContent="update applied ✓";
+      modal("Firmware updated",
+        h("p",{text:"The switch verified the image and rebooted into it. The session was reset, so you will be asked to log in again."}),
+        [h("button",{class:"ctl pri",text:"Go to login",onclick:function(){location.href="/login.html"}})]);
+    },function(){
+      clearTimeout(to);
+      waited+=3;
+      if(waited===9)st.textContent="switch is rebooting…";
+      if(waited>150){
+        st.textContent="switch has not come back after 150 s — check power / serial console";
+        $("fwup").disabled=false;
+        return;
+      }
+      setTimeout(probe,3000);
+    });
+  }
+  waited=3;
+  setTimeout(probe,3000);
+}
 tabHooks.fw={};
 
 /* ============================================================

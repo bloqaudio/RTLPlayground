@@ -400,7 +400,8 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
       <div class="card"><h2>Firmware update</h2>
         <p class="small mut" style="margin-bottom:12px">
           Upload an RTLPlayground image (512&nbsp;KiB <span class="mono">.bin</span>). The image is staged to
-          flash, CRC-checked by the switch, and applied on the next reboot. The startup configuration is preserved.
+          flash and CRC-checked; on success the switch reboots itself, re-verifies the image and applies it.
+          The startup configuration is preserved.
         </p>
         <input type="file" id="fwfile" accept=".bin">
         <div id="fwinfo" class="small" style="margin:10px 0"></div>
