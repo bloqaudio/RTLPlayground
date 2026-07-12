@@ -367,6 +367,14 @@ uint8_t stream_upload(uint16_t bptr)
 						"Content-Type: text/plain\r\n\r\n"
 						"NO: checksum failed, not applied\n");
 				}
+			} else {
+				// Config upload: answer instead of closing the
+				// connection unacknowledged (a zero-byte close makes
+				// fetch() fail with NetworkError even though the
+				// sector was written)
+				slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n"
+					"Content-Type: text/plain\r\n\r\n"
+					"OK: config written\n");
 			}
 			// Make sure there is a 0 at the end of the uploaded data
 			flash_buf[0] = 0;
@@ -375,9 +383,6 @@ uint8_t stream_upload(uint16_t bptr)
 			flash_write_bytes(flash_buf);
 			if (bptr >= uip_len)
 				return 0;
-			if(!verify_crc)
-				//ugly hack to signal connection finished after config upload.
-				uip_close();
 			return 1;
 		}
 		if (p[bptr] == boundary[bindex]) {

@@ -1192,8 +1192,11 @@ function doWriteConfig(txt){
   var form=new FormData();
   form.append("configuration",new Blob([txt],{type:"application/octet-stream"}),"config.txt");
   toast("Writing configuration…");
-  api("/config",{method:"POST",body:form}).then(function(r){
-    if(!r.ok)throw new Error("config write failed: HTTP "+r.status);
+  /* Older firmware closes the /config connection without any HTTP
+   * response (fetch rejects with NetworkError) even though the sector
+   * was written — swallow that and let the read-back verify decide. */
+  api("/config",{method:"POST",body:form}).catch(function(){return null}).then(function(r){
+    if(r&&!r.ok)throw new Error("config write failed: HTTP "+r.status);
     return getText("/config");
   }).then(function(back){
     back=back.replace(/\0[\s\S]*$/,"").replace(/\r\n/g,"\n").trim();

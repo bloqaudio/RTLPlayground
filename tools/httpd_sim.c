@@ -855,10 +855,18 @@ void launch(struct Server *server)
 					printf("%s", upload_buffer);
 					if (!bindex || boundary[bindex])
 						goto bad_request;
-					char *response = "HTTP/1.1 200 OK\r\n"
-							"Content-Type: text/html\r\n\r\n"
-							"<!DOCTYPE html> <html><head><title>Upload OK</title></head>"
-							"<body><h1>File uploaded successully</h1></html>";
+					/* Mirror the firmware's verdict responses exactly —
+					 * the old generic HTML here masked the fact that
+					 * real firmware sent no /config response at all */
+					char *response;
+					if (config_upload)
+						response = "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n"
+							"Content-Type: text/plain\r\n\r\n"
+							"OK: config written\n";
+					else
+						response = "HTTP/1.1 200 OK\r\nContent-Length: 33\r\n"
+							"Content-Type: text/plain\r\n\r\n"
+							"OK: checksum verified, rebooting\n";
 					write(new_socket, response, strlen(response));
 					if (config_upload) {
 						uploaded_config_len = (uptr - upload_buffer);
