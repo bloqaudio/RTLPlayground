@@ -51,6 +51,7 @@ __xdata uint32_t max_upload;
 __xdata uint16_t short_parsed;
 
 __xdata char passwd[21];
+__xdata char hostname[HOSTNAME_MAX_LEN + 1];
 __xdata char session_id[SESSION_ID_LENGTH + 1];
 __xdata uint8_t authenticated;
 __xdata uint32_t now;

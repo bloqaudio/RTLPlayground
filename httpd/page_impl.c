@@ -225,7 +225,10 @@ void send_basic_info(void)
 {
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);
 	dbg_string("send_basic_info called\n");
-	slen += strtox(outbuf + slen, "{\"ip_address\":\"");
+	slen += strtox(outbuf + slen, "{\"hostname\":\"");
+	for (__xdata char *h = hostname; *h; h++)
+		char_to_html(*h);
+	slen += strtox(outbuf + slen, "\",\"ip_address\":\"");
 	itoa_html(uip_hostaddr[0]); char_to_html('.');
 	itoa_html(uip_hostaddr[0] >> 8); char_to_html('.');
 	itoa_html(uip_hostaddr[1]); char_to_html('.');

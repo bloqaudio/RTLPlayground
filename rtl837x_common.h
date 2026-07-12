@@ -39,6 +39,10 @@ extern __xdata uint8_t sbuf[SBUF_SIZE];
 // Size of the port name, including the terminating null byte
 #define PORT_NAME_SIZE 32
 
+// Maximum length of the device hostname, excluding the terminating null byte
+#define HOSTNAME_MAX_LEN 20
+#define HOSTNAME_DEFAULT "rtl-switch"
+
 // Size of the memory area dedicated to VLAN-names
 #define VLAN_NAMES_SIZE 1024
 
@@ -114,6 +118,7 @@ struct flash_region_t {
 };
 
 extern __xdata char port_names[9][PORT_NAME_SIZE];
+extern __xdata char hostname[HOSTNAME_MAX_LEN + 1];
 
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_SIZE+2];
 extern __xdata struct uip_eth_addr uip_ethaddr;

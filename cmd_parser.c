@@ -1129,6 +1129,40 @@ void parse_passwd(void)
 }
 
 
+// Set or print the device hostname (RFC 952 style: letters, digits and
+// inner hyphens), used for DHCP option 12 and the web-interface
+void parse_hostname(void)
+{
+	if (cmd_words_len == 1) {
+		print_string_x(hostname);
+		write_char('\n');
+		return;
+	}
+	uint8_t i = cmd_words_b[1];
+	uint8_t j = 0;
+	uint8_t c = cmd_buffer[i];
+	// Validate the whole name before touching the current hostname
+	while (c != '\0' && c != ' ') {
+		if (!isnumber(c) && !(c >= 'a' && c <= 'z')
+		    && !(c >= 'A' && c <= 'Z') && c != '-')
+			goto err;
+		if (j >= HOSTNAME_MAX_LEN)
+			goto err;
+		j++;
+		c = cmd_buffer[i + j];
+	}
+	if (!j || cmd_buffer[i] == '-' || cmd_buffer[i + j - 1] == '-')
+		goto err;
+	for (c = 0; c < j; c++)
+		hostname[c] = cmd_buffer[i + c];
+	hostname[j] = '\0';
+	return;
+
+err:
+	print_string("usage: hostname [<name>]  (max 20 chars: a-z A-Z 0-9 '-', no leading/trailing '-')\n");
+}
+
+
 void parse_eee(void)
 {
 	__xdata int8_t port = -1;
@@ -1571,6 +1605,8 @@ void cmd_parser(void) __banked
 			parse_rnd();
 		} else if (cmd_compare(0, "passwd")) {
 			parse_passwd();
+		} else if (cmd_compare(0, "hostname")) {
+			parse_hostname();
 		} else if (cmd_compare(0, "eee")) {
 			parse_eee();
 		} else if (cmd_compare(0, "bw")) {
@@ -1642,8 +1678,9 @@ void execute_config(void) __banked
 	__xdata uint32_t pos = CONFIG_START;
 	__xdata uint8_t pages_left = CONFIG_LEN / FLASH_READ_BURST_SIZE;
 
-	// Set default password, it can be overwritten in the configuration file
+	// Set default password and hostname, both can be overwritten in the configuration file
 	strtox(passwd, PASSWORD);
+	strtox(hostname, HOSTNAME_DEFAULT);
 	save_cmd = 0;
 
 	uint8_t cmd_idx = 0;
