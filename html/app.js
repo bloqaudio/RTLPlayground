@@ -1262,40 +1262,59 @@ $("fwup").addEventListener("click",function(){
       form.append("uploadedfile",fwBuf,fwBuf.name);
       var xhr=new XMLHttpRequest();
       var prog=$("fwprog"),st=$("fwstat");
-      var sent=false;
+      var sent=false,settled=false;
       prog.style.display="";prog.value=0;
       $("fwup").disabled=true;
       st.textContent="uploading…";
+      function settle(fn){if(settled)return;settled=true;fn()}
       xhr.upload.onprogress=function(e){if(e.lengthComputable)prog.value=100*e.loaded/e.total};
-      xhr.upload.onload=function(){sent=true;st.textContent="upload sent — switch is verifying…"};
-      /* the firmware never answers /upload: good CRC → it closes the
-       * connection and resets itself; bad CRC → it closes and stays up.
-       * Either way the request ends here or in onerror. */
-      xhr.onload=function(){fwSettle(st)};
-      xhr.onerror=function(){
-        if(!sent){st.textContent="upload failed — connection lost mid-transfer";$("fwup").disabled=false;return;}
-        fwSettle(st);
+      xhr.upload.onload=function(){
+        sent=true;st.textContent="upload sent — switch is verifying…";
+        /* older firmware never answers /upload (it resets before even
+         * the TCP close leaves the chip) — if nothing has fired a few
+         * seconds after the body went out, fall back to probing */
+        setTimeout(function(){settle(function(){
+          try{xhr.abort()}catch(e){}
+          fwSettle(st,false);
+        })},4000);
       };
+      xhr.onload=function(){settle(function(){
+        if(xhr.status===200){
+          st.textContent="checksum verified — switch is rebooting…";
+          fwSettle(st,true);
+        }else{
+          st.textContent="✕ the switch rejected the image (bad checksum) — nothing was applied";
+          $("fwup").disabled=false;
+        }
+      })};
+      xhr.onerror=function(){settle(function(){
+        if(!sent){st.textContent="upload failed — connection lost mid-transfer";$("fwup").disabled=false;return;}
+        fwSettle(st,false);
+      })};
       xhr.open("POST","/upload");
       xhr.send(form);
     });
 });
-/* Tell the two silent outcomes apart by whether the switch keeps
- * answering: a reply within the first seconds means it never rebooted
- * (checksum rejected); going dark and coming back means the update
- * was applied. Raw fetch, not api(): a 401 from the fresh session
- * still counts as "the switch is back". */
-function fwSettle(st){
-  var waited=0;
-  st.textContent="switch is verifying…";
+/* Wait out the reboot by probing. knownGood: the firmware already
+ * answered 200, so any early reply just means the reset is still
+ * pending — keep polling. Otherwise (no verdict, older firmware) an
+ * answer in the first seconds means no reboot happened → rejected.
+ * Raw fetch, not api(): a 401 from the fresh boot still counts as
+ * "the switch is back". */
+function fwSettle(st,knownGood){
+  var waited=3,down=false;
   function probe(){
     var ctl=("AbortController"in window)?new AbortController():null;
     var to=setTimeout(function(){if(ctl)ctl.abort()},2500);
     fetch("/information.json",{signal:ctl?ctl.signal:undefined,cache:"no-store"}).then(function(){
       clearTimeout(to);
-      if(waited<=6){
-        st.textContent="✕ the switch rejected the image (bad checksum) — nothing was applied";
-        $("fwup").disabled=false;
+      if(!down&&waited<=9){
+        if(!knownGood){
+          st.textContent="✕ the switch rejected the image (bad checksum) — nothing was applied";
+          $("fwup").disabled=false;
+          return;
+        }
+        waited+=3;setTimeout(probe,3000);  /* reset still pending */
         return;
       }
       st.textContent="update applied ✓";
@@ -1304,8 +1323,9 @@ function fwSettle(st){
         [h("button",{class:"ctl pri",text:"Go to login",onclick:function(){location.href="/login.html"}})]);
     },function(){
       clearTimeout(to);
+      down=true;
       waited+=3;
-      if(waited===9)st.textContent="switch is rebooting…";
+      st.textContent="switch is rebooting…";
       if(waited>150){
         st.textContent="switch has not come back after 150 s — check power / serial console";
         $("fwup").disabled=false;
@@ -1314,7 +1334,6 @@ function fwSettle(st){
       setTimeout(probe,3000);
     });
   }
-  waited=3;
   setTimeout(probe,3000);
 }
 tabHooks.fw={};
