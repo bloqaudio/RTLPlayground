@@ -44,8 +44,13 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",appl
 applyTheme();
 
 /* ============================================================
- * serialized fetch queue — the uIP stack handles one request
- * at a time, so every request goes through this queue
+ * serialized fetch queue. The firmware sends no Content-Length
+ * and delimits each response by closing the connection, and it
+ * shares one output buffer across connections — so the queue
+ * must hold the next request until the previous BODY is fully
+ * received (fetch() alone resolves at headers), matching the
+ * old XHR queue's readyState-4 behavior.
+ * api() resolves with {ok, status, body}.
  * ============================================================ */
 var _q=Promise.resolve();
 function api(path,opts){
@@ -54,17 +59,19 @@ function api(path,opts){
       opts=opts||{};
       var ctl=("AbortController"in window)?new AbortController():null;
       if(ctl)opts.signal=ctl.signal;
-      var to=setTimeout(function(){if(ctl)ctl.abort()},8000);
+      var to=setTimeout(function(){if(ctl)ctl.abort()},10000);
       return fetch(path,opts).then(function(r){
-        clearTimeout(to);
-        if(r.status===401){location.href="/login.html";throw new Error("auth");}
-        resolve(r);
-      },function(e){clearTimeout(to);reject(e)});
+        if(r.status===401){clearTimeout(to);location.href="/login.html";throw new Error("auth");}
+        return r.text().then(function(body){
+          clearTimeout(to);
+          resolve({ok:r.ok,status:r.status,body:body});
+        });
+      }).catch(function(e){clearTimeout(to);reject(e)});
     });
   });
 }
-function getJSON(p){return api(p).then(function(r){if(!r.ok)throw new Error(p+" → "+r.status);return r.json()})}
-function getText(p){return api(p).then(function(r){if(!r.ok)throw new Error(p+" → "+r.status);return r.text()})}
+function getJSON(p){return api(p).then(function(r){if(!r.ok)throw new Error(p+" → "+r.status);return JSON.parse(r.body)})}
+function getText(p){return api(p).then(function(r){if(!r.ok)throw new Error(p+" → "+r.status);return r.body})}
 
 /* persistable-command detection: successful /cmd of one of these
  * marks the running config dirty vs. flash */
