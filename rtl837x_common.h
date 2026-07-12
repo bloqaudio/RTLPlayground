@@ -120,6 +120,12 @@ struct flash_region_t {
 extern __xdata char port_names[9][PORT_NAME_SIZE];
 extern __xdata char hostname[HOSTNAME_MAX_LEN + 1];
 
+// While set to 1, write_char() also appends console output to the HTTP
+// response in outbuf/slen (POST /cmd); becomes 2 once the buffer is full
+extern __xdata uint8_t cmd_capture;
+extern __xdata uint8_t outbuf[];
+extern __xdata uint16_t slen;
+
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_SIZE+2];
 extern __xdata struct uip_eth_addr uip_ethaddr;
 

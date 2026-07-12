@@ -231,10 +231,19 @@ void write_char_no_syslog(char c)
 	SBUF = c;
 }
 
+__xdata uint8_t cmd_capture;
+
 void write_char(char c)
 {
 	write_char_no_syslog(c);
 
+	if (cmd_capture == 1) {
+		// Reserve room for the "[output truncated]" marker
+		if (slen < TCP_OUTBUF_SIZE - 24)
+			outbuf[slen++] = c;
+		else
+			cmd_capture = 2;
+	}
 	if (syslog_state.enabled) {
 		logbuf[syslog_state.writeptr++] = c;
 		syslog_state.writeptr &= (LOGBUF_SIZE - 1);

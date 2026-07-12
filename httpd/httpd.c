@@ -82,6 +82,7 @@ void httpd_init(void) __banked
 	// Start listening to port 80
 	uip_listen(HTONS(80));
 	s->tstate = TSTATE_CLOSED;
+	cmd_capture = 0; // xdata is not zeroed by the startup code
 }
 
 
@@ -465,11 +466,18 @@ void handle_post(void)
 			send_unauthorized();
 			return;
 		}
+		// Capture the console output of the commands as the response
+		// body; both status lines below have the same length so the
+		// header can be patched after execution
+		slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n");
+		cmd_capture = 1;
 		execute_commands(p);
-		if (err_status != ERR_OK) {
-			send_bad_request();
-			return;
-		}
+		if (cmd_capture == 2)
+			slen += strtox(outbuf + slen, "\n[output truncated]");
+		cmd_capture = 0;
+		if (err_status != ERR_OK)
+			memcpyc(outbuf + 9, (__code uint8_t *)"400 NO", 6);
+		return;
 	} else if (is_word(request_path, "login")) {
 		dbg_string("POST login\n");
 

@@ -104,7 +104,7 @@ function setDirty(d){
 }
 function postCmd(cmd,quiet){
   return api("/cmd",{method:"POST",body:cmd}).then(function(r){
-    if(!r.ok)throw new Error("command rejected: "+cmd);
+    if(!r.ok)throw new Error(((r.body||"").split("\n")[0])||("command rejected: "+cmd));
     if(isConfCmd(cmd.trim()))setDirty(true);
     if(!quiet)toast("Applied: "+cmd,"ok");
     return r;
@@ -1076,7 +1076,10 @@ function sysConsole(){
   if(!c)return;
   var out=$("sy-cout");
   api("/cmd",{method:"POST",body:c}).then(function(r){
-    out.textContent+="> "+c+"\n"+(r.ok?"OK":"ERROR "+r.status)+"\n";
+    var body=r.body.replace(/\s+$/,"");
+    out.textContent+="> "+c+"\n";
+    if(body)out.textContent+=body+"\n";
+    else out.textContent+=(r.ok?"OK":"ERROR "+r.status)+"\n";
     out.scrollTop=out.scrollHeight;
     if(r.ok&&isConfCmd(c))setDirty(true);
   }).catch(function(e){out.textContent+="> "+c+"\n"+e+"\n"});
