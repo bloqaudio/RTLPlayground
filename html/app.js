@@ -1262,10 +1262,9 @@ $("fwup").addEventListener("click",function(){
       form.append("uploadedfile",fwBuf,fwBuf.name);
       var xhr=new XMLHttpRequest();
       var prog=$("fwprog"),st=$("fwstat");
-      var sent=false,settled=false,t0=Date.now(),tick=null;
+      var sent=false,settled=false,t0=Date.now(),pct=0;
       prog.style.display="";prog.value=0;
       $("fwup").disabled=true;
-      st.textContent="uploading…";
       function settle(fn){
         if(settled)return;
         settled=true;
@@ -1273,18 +1272,22 @@ $("fwup").addEventListener("click",function(){
         prog.style.display="none";
         fn();
       }
-      /* progress events only measure the handoff to the OS socket
-       * buffer — the whole image is "sent" almost instantly while the
-       * switch drains it over ~a minute, writing flash inline. So show
-       * elapsed time instead of a fake percentage. */
-      xhr.upload.onprogress=function(e){if(e.lengthComputable)prog.value=100*e.loaded/e.total};
+      /* an XHR shows no browser-level activity (no tab spinner like the
+       * old form POST), so animate the status ourselves from the first
+       * moment: percent while sending, elapsed seconds throughout */
+      var tick=setInterval(function(){
+        var s=Math.round((Date.now()-t0)/1000);
+        st.textContent=sent
+          ?"finishing flash write… "+s+" s"
+          :"uploading… "+pct+"% · "+s+" s";
+      },500);
+      st.textContent="uploading… 0% · 0 s";
+      xhr.upload.onprogress=function(e){
+        if(e.lengthComputable){pct=Math.round(100*e.loaded/e.total);prog.value=pct;}
+      };
       xhr.upload.onload=function(){
         sent=true;
         prog.removeAttribute("value"); /* indeterminate */
-        tick=setInterval(function(){
-          st.textContent="writing to switch flash… "+Math.round((Date.now()-t0)/1000)+" s";
-        },1000);
-        st.textContent="writing to switch flash…";
       };
       xhr.onload=function(){settle(function(){
         if(xhr.status===200){
