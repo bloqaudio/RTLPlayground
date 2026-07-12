@@ -1262,21 +1262,29 @@ $("fwup").addEventListener("click",function(){
       form.append("uploadedfile",fwBuf,fwBuf.name);
       var xhr=new XMLHttpRequest();
       var prog=$("fwprog"),st=$("fwstat");
-      var sent=false,settled=false;
+      var sent=false,settled=false,t0=Date.now(),tick=null;
       prog.style.display="";prog.value=0;
       $("fwup").disabled=true;
       st.textContent="uploading…";
-      function settle(fn){if(settled)return;settled=true;fn()}
+      function settle(fn){
+        if(settled)return;
+        settled=true;
+        clearInterval(tick);
+        prog.style.display="none";
+        fn();
+      }
+      /* progress events only measure the handoff to the OS socket
+       * buffer — the whole image is "sent" almost instantly while the
+       * switch drains it over ~a minute, writing flash inline. So show
+       * elapsed time instead of a fake percentage. */
       xhr.upload.onprogress=function(e){if(e.lengthComputable)prog.value=100*e.loaded/e.total};
       xhr.upload.onload=function(){
-        sent=true;st.textContent="upload sent — switch is verifying…";
-        /* older firmware never answers /upload (it resets before even
-         * the TCP close leaves the chip) — if nothing has fired a few
-         * seconds after the body went out, fall back to probing */
-        setTimeout(function(){settle(function(){
-          try{xhr.abort()}catch(e){}
-          fwSettle(st,false);
-        })},4000);
+        sent=true;
+        prog.removeAttribute("value"); /* indeterminate */
+        tick=setInterval(function(){
+          st.textContent="writing to switch flash… "+Math.round((Date.now()-t0)/1000)+" s";
+        },1000);
+        st.textContent="writing to switch flash…";
       };
       xhr.onload=function(){settle(function(){
         if(xhr.status===200){
@@ -1289,6 +1297,8 @@ $("fwup").addEventListener("click",function(){
       })};
       xhr.onerror=function(){settle(function(){
         if(!sent){st.textContent="upload failed — connection lost mid-transfer";$("fwup").disabled=false;return;}
+        /* no verdict (pre-89d49a6 firmware, or the connection dropped):
+         * infer the outcome from whether the switch reboots */
         fwSettle(st,false);
       })};
       xhr.open("POST","/upload");
@@ -1310,7 +1320,7 @@ function fwSettle(st,knownGood){
       clearTimeout(to);
       if(!down&&waited<=9){
         if(!knownGood){
-          st.textContent="✕ the switch rejected the image (bad checksum) — nothing was applied";
+          st.textContent="✕ no reboot detected — the image was most likely rejected. If updating from old firmware, verify the version in the sidebar after logging in again.";
           $("fwup").disabled=false;
           return;
         }
