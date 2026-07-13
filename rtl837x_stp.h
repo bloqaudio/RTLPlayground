@@ -6,7 +6,8 @@ void stp_in(void) __banked;
 void stp_setup(void) __banked;
 void stp_timers(void) __banked;
 void stp_off(void) __banked;
+void stp_status(void) __banked;
 
-#define TIME_HELLO 0x200 // 2 sec
+extern __xdata uint16_t stp_bridge_prio;
 
 #endif

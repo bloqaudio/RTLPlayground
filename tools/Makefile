@@ -3,7 +3,11 @@ CCFLAGS = -Wall -o
 BUILDDIR = output
 
 all: create_build_dir $(BUILDDIR)/injector $(BUILDDIR)/fileadder $(BUILDDIR)/httpd_sim\
-	$(BUILDDIR)/crc_calculator $(BUILDDIR)/imagebuilder
+	$(BUILDDIR)/crc_calculator $(BUILDDIR)/imagebuilder $(BUILDDIR)/rstp_test
+
+$(BUILDDIR)/rstp_test: rstp_test.c ../rstp.c ../rstp.h
+	gcc -I.. -Wall -o $@ rstp_test.c
+	$@
 
 create_build_dir:
 	mkdir -p $(BUILDDIR)

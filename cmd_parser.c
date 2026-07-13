@@ -12,6 +12,7 @@
 #include "rtl837x_regs.h"
 #include "rtl837x_sfr.h"
 #include "rtl837x_stp.h"
+#include "rstp.h"
 #include "rtl837x_igmp.h"
 #include "rtl837x_bandwidth.h"
 #include "dhcp.h"
@@ -1658,10 +1659,38 @@ void cmd_parser(void) __banked
 				print_string("STP enabled\n");
 				stpEnabled = 1;
 				stp_setup();
-			} else {
+			} else if (cmd_compare(1, "status")) {
+				skip_history = 1;	// read-only
+				stp_status();
+			} else if (cmd_compare(1, "prio") && cmd_words_len == 3) {
+				// stp prio <0-15>, bridge priority in 4096 steps
+				__xdata uint16_t prio;
+				if (!atoi_short(&prio, cmd_words_b[2]) || prio > 15) {
+					print_string("prio: 0-15\n");
+					err_status = ERR_INVALID_ARG;
+				} else {
+					stp_bridge_prio = prio << 12;
+					if (stpEnabled)
+						stp_setup();
+				}
+			} else if (cmd_compare(1, "edge") && cmd_words_len == 4) {
+				// stp edge <port> <auto|on|off>
+				uint8_t p = cmd_buffer[cmd_words_b[2]] - '1';
+				if (p >= 9) {
+					print_string("Illegal port\n");
+					err_status = ERR_INVALID_ARG;
+				} else {
+					p = machine.phys_to_log_port[p];
+					rstp_set_edge(p, cmd_compare(3, "on") ? RSTP_EDGE_ON
+						: cmd_compare(3, "off") ? RSTP_EDGE_OFF
+						: RSTP_EDGE_AUTO);
+				}
+			} else if (cmd_compare(1, "off")) {
 				print_string("STP disabled\n");
 				stp_off();
 				stpEnabled = 0;
+			} else {
+				print_string("stp [on|off|status|prio <0-15>|edge <port> <auto|on|off>]\n");
 			}
 		} else if (cmd_compare(0, "pvid") && cmd_words_len == 3) {
 			__xdata uint16_t pvid;
