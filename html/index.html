@@ -276,6 +276,29 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
       </div>
     </section>
 
+
+    <section class="tab" id="tab-stp">
+      <div class="card"><h2>Spanning tree <span class="hint">RSTP, 802.1w</span></h2>
+        <label class="row"><span class="lb">Enabled</span>
+          <span class="switch"><input type="checkbox" id="stpen"><i></i></span></label>
+        <label class="row"><span class="lb">Bridge priority</span>
+          <select class="in" id="stpprio"></select>
+          <button class="ctl" id="stpprioset">Set</button></label>
+        <p class="small mono" id="stpids">—</p>
+        <p class="small mut">Lower priority wins the root election (default 8 = 32768).
+        Priority and edge settings persist via Save to flash; put <code>stp on</code> in the
+        startup config to enable at boot.</p>
+      </div>
+      <div class="card"><h2>Port roles</h2>
+        <div class="scrollx"><table class="t" id="stptable">
+          <thead><tr><th>Port</th><th>Role</th><th>State</th><th>Edge</th><th></th></tr></thead>
+          <tbody></tbody></table></div>
+        <p class="small mut">Edge ports forward immediately and generate no topology changes;
+        Auto treats a port as edge after 3&nbsp;s without BPDUs, and any received BPDU revokes
+        edge status. A discarding Alternate port is a healthy redundant uplink.</p>
+      </div>
+    </section>
+
     <section class="tab" id="tab-stats">
       <div class="card"><h2>Port statistics <span class="hint">totals since boot</span></h2>
         <div class="scrollx"><table class="t" id="stable">
@@ -371,7 +394,7 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
         </div>
         <div class="card"><h2>Services</h2>
           <label class="row"><span class="lb">Spanning tree</span>
-            <span class="switch"><input type="checkbox" id="sy-stp"><i></i></span></label>
+            <span class="small mut">configured on the Spanning tree page</span></label>
           <label class="row"><span class="lb">IGMP snooping</span>
             <span class="switch"><input type="checkbox" id="sy-igmp"><i></i></span></label>
           <label class="row"><span class="lb">Syslog</span>
@@ -433,5 +456,6 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
 </div></div>
 
 <script src="/app.js"></script>
+<script src="/app2.js"></script>
 </body>
 </html>

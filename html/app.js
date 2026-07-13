@@ -90,7 +90,8 @@ var CONF_CMDS=[
   /^mirror(\s+\d{1,2})(\s+\d{1,2}[tr]?)+$/,
   /^lag\s+\d(\s+\d{1,2})+$/,/^laghash\s+\d(\s+\w+)+$/,
   /^isolate\s+\d{1,2}(\s+(off|\d{1,2}))+$/,
-  /^stp\s+(on|off)$/,/^igmp\s+(on|off)$/,
+  /^stp\s+(on|off)$/,/^stp\s+prio\s+([0-9]|1[0-5])$/,
+  /^stp\s+edge\s+[1-9]\s+(auto|on|off)$/,/^igmp\s+(on|off)$/,
   /^mtu\s+\d{1,2}\s+\d+$/,
   /^bw\s+(in|out)\s+\d{1,2}\s+\S+$/,
   /^fc\s+(on|off|gen|auto)(\s+[1-9])?$/,
@@ -144,6 +145,7 @@ var TABS=[
   {id:"dash",  label:"Dashboard",  icon:"M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z"},
   {id:"ports", label:"Ports",      icon:"M2 7h20v10H2zM6 11v2M10 11v2M14 11v2M18 11v2"},
   {id:"fc",    label:"Flow control",icon:"M9 5v14M15 5v14"},
+  {id:"stp",   label:"Spanning tree",icon:"M12 3v5M12 8L5 13v8M12 8l7 5v8M2 21h20"},
   {id:"stats", label:"Statistics", icon:"M4 20V10M10 20V4M16 20v-7M22 20H2"},
   {id:"vlan",  label:"VLANs",      icon:"M12 3v6M12 9l-7 5M12 9l7 5M5 14v5M19 14v5M3 21h4M17 21h4"},
   {id:"l2",    label:"MAC table",  icon:"M4 5h16M4 12h16M4 19h10"},
@@ -440,99 +442,13 @@ function applyPort(i){
   postCmds(cmds).then(loadMtu).catch(function(){});
 }
 
-/* flow control (802.3x) — per-port pause mode via the console endpoint.
- * `fc status <n>` output: "Port XX: auto" | "Port XX: forced: rx-pause
- * [tx-pause]" | "Port XX: forced: off" (XX is the logical port in hex —
- * ignored; we query per user-port so the label doesn't matter). */
-var FCMODES=[["auto","Auto"],["on","On (obey pause)"],["off","Off (ignore pause)"]];
-function fcParse(body){
-  if(body.indexOf("SFP")>=0)return null;
-  if(/\bauto\b/.test(body))return"auto";
-  if(/rx-pause/.test(body))return/tx-pause/.test(body)?"gen":"on";
-  if(/forced:\s*off/.test(body))return"off";
-  return null;
-}
-function fcQuery(n){
-  return api("/cmd",{method:"POST",body:"fc status "+n}).then(function(r){
-    if(!r.ok)throw new Error("fc status "+n+" failed");
-    return fcParse(r.body);
-  });
-}
-function fcShow(i,m){
-  var el=$("fccur"+i);
-  if(el)el.innerHTML=m==="auto"?'<span class="badge ok">auto</span>'
-    :m==="on"?'<span class="badge">forced: obey</span>'
-    :m==="gen"?'<span class="badge">forced: obey+generate</span>'
-    :m==="off"?'<span class="badge">forced: off</span>'
-    :'<span class="badge">?</span>';
-  var sel=$("fcm"+i);
-  if(sel&&m&&m!=="gen"&&document.activeElement!==sel)sel.value=m;
-}
-function fcRefresh(port){
-  S.ports.forEach(function(p){
-    if(p.isSFP||p.portNum>9)return;
-    if(port&&p.portNum!==port)return;
-    var i=p.portNum-1;
-    fcQuery(p.portNum).then(function(m){fcShow(i,m)}).catch(function(){});
-  });
-}
-function buildFc(){
-  var tb=$("fctable").tBodies[0];
-  if(tb.rows.length||!S.n)return;
-  S.ports.forEach(function(p){
-    if(p.isSFP||p.portNum>9)return;
-    var i=p.portNum-1;
-    var sel=h("select",{class:"in",id:"fcm"+i});
-    FCMODES.forEach(function(o){sel.appendChild(h("option",{value:o[0],text:o[1]}))});
-    var tr=tb.insertRow();
-    tr.insertCell().textContent=portLabel(p);
-    tr.insertCell().id="fccur"+i;
-    tr.insertCell().appendChild(sel);
-    tr.insertCell().appendChild(h("button",{class:"ctl",text:"Apply",onclick:function(){applyFc(p.portNum)}}));
-  });
-  fcRefresh();
-}
-function applyFc(n){
-  var mode=$("fcm"+(n-1)).value;
-  confirmModal("Set flow control to "+mode+" on port "+n+"?",
-    "The port link bounces for ~5 s and renegotiates speed; the command returns when done.",
-    function(){
-      toast("fc "+mode+" "+n+" — port is bouncing, ~6 s…");
-      postCmd("fc "+mode+" "+n).then(function(){fcRefresh(n)}).catch(function(){});
-    });
-}
-/* connected-device column: MACs the switch has learned on each port */
-function portsMacs(){
-  l2Load().then(function(all){
-    var by={};
-    all.forEach(function(e){
-      if(e.pport==="CPU")return;
-      (by[e.pport]=by[e.pport]||[]).push(e.mac);
-    });
-    S.ports.forEach(function(p){
-      var el=$("pmac"+(p.portNum-1));
-      if(!el)return;
-      var m=by[p.portNum]||[];
-      /* only a single learned MAC is reliably the attached device;
-       * several means a switch/AP behind the port — don't imply one
-       * arbitrary MAC is "the" device, just count them */
-      el.textContent=!m.length?"—":(m.length===1?m[0]:m.length+" devices");
-      el.title=m.join("\n");
-    });
-  }).catch(function(){});
-}
 tabHooks.ports={
   enter:function(){statusPoller.start();needPorts(function(){buildPorts();portsMacs()})},
   leave:function(){statusPoller.stop()},
   status:portsStatus,
 };
-/* flow-control tab: the status poller supplies S.ports; buildFc no-ops
- * once the table exists, so the per-port fc queries fire only once */
-tabHooks.fc={
-  enter:function(){statusPoller.start();buildFc()},
-  leave:function(){statusPoller.stop()},
-  status:buildFc,
-};
+
+
 
 /* ============================================================
  * statistics tab
@@ -1105,7 +1021,6 @@ function cfgParseKnown(txt){
     var m=l.match(/^syslog ip ((\d{1,3}\.){3}\d{1,3})$/);
     if(m)S.cfgKnown.syslogIp=m[1];
   });
-  $("sy-stp").checked=S.cfgKnown.stp;
   $("sy-igmp").checked=S.cfgKnown.igmp;
   $("sy-syslog").checked=S.cfgKnown.syslogOn;
   if(S.cfgKnown.syslogIp&&!$("sy-sysip").value)$("sy-sysip").value=S.cfgKnown.syslogIp;
@@ -1136,9 +1051,6 @@ $("sy-dhcp").addEventListener("click",function(){
   confirmModal("Switch to DHCP?",
     "The switch requests an address via DHCP. You must find its new IP to reconnect.",
     function(){postCmd("ip dhcp").catch(function(){})});
-});
-$("sy-stp").addEventListener("change",function(){
-  postCmd("stp "+(this.checked?"on":"off")).catch(function(){});
 });
 $("sy-igmp").addEventListener("change",function(){
   var el=this;
@@ -1228,7 +1140,7 @@ var CONF_OVERWRITE=[
   /^port\s+\d{1,2}(?!\s+name\b)/,/^port\s+\d{1,2}\s+name\b/,
   /^eee\s+\d{1,2}\b/,/^eee\b/,/^mirror\b/,
   /^lag\s+\d+\b/,/^laghash\b/,/^isolate\s+\d{1,2}\b/,
-  /^stp\b/,/^igmp\b/,/^mtu\s+\d{1,2}\b/,/^bw\s+(in|out)\s+\d{1,2}\b/,
+  /^stp\s+prio\b/,/^stp\s+edge\s+[1-9]\b/,/^igmp\b/,/^mtu\s+\d{1,2}\b/,/^bw\s+(in|out)\s+\d{1,2}\b/,
 ];
 function mergeConf(base,texts){
   var conf=base.slice();
@@ -1256,6 +1168,9 @@ function mergeConf(base,texts){
       }
       if(/^vlan\s+\d{1,4}\s+mgmt$/.test(line))
         conf=conf.filter(function(c){return!/^vlan\s+\d{1,4}\s+mgmt$/.test(c)});
+      /* stp on / stp off replace each other */
+      if(/^stp (on|off)$/.test(line))
+        conf=conf.filter(function(c){return!/^stp (on|off)$/.test(c)});
       /* fc keys on the trailing port, not a literal prefix: a per-port fc
        * replaces that port's line; a portless fc (all ports) replaces all */
       var fcm=line.match(/^fc\s+(?:on|off|gen|auto)(?:\s+([1-9]))?$/);

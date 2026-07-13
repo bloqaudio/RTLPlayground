@@ -28,6 +28,7 @@ extern __xdata struct uip_eth_addr uip_ethaddr;
 extern __xdata uint8_t uip_buf[UIP_CONF_BUFFER_SIZE + 2];
 extern volatile __xdata uint32_t ticks;
 extern __xdata uint16_t management_vlan;
+extern __xdata uint8_t stpEnabled;
 
 /* configurable via `stp prio`, steps of 4096 like everyone else */
 __xdata uint16_t stp_bridge_prio;
@@ -257,6 +258,10 @@ void stp_status(void) __banked
 	static const char roles[5] = {'-', 'R', 'D', 'A', 'B'};
 	static const char states[3] = {'d', 'l', 'F'};
 
+	if (!stpEnabled) {
+		print_string("Disabled\n");
+		return;
+	}
 	print_string("Bridge "); print_id(rstp_bridge_id);
 	print_string("\nRoot   "); print_id(rstp_root_vec);
 	if (rstp_root_port == 0xff) {
