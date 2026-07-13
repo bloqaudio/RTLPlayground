@@ -143,6 +143,7 @@ $("mback").addEventListener("click",function(e){if(e.target===this)closeModal()}
 var TABS=[
   {id:"dash",  label:"Dashboard",  icon:"M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z"},
   {id:"ports", label:"Ports",      icon:"M2 7h20v10H2zM6 11v2M10 11v2M14 11v2M18 11v2"},
+  {id:"fc",    label:"Flow control",icon:"M9 5v14M15 5v14"},
   {id:"stats", label:"Statistics", icon:"M4 20V10M10 20V4M16 20v-7M22 20H2"},
   {id:"vlan",  label:"VLANs",      icon:"M12 3v6M12 9l-7 5M12 9l7 5M5 14v5M19 14v5M3 21h4M17 21h4"},
   {id:"l2",    label:"MAC table",  icon:"M4 5h16M4 12h16M4 19h10"},
@@ -408,7 +409,6 @@ function loadMtu(){
 }
 function portsStatus(){
   buildPorts();
-  buildFc();
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i);
     if(el)el.innerHTML=!p.enabled?'<span class="badge">off</span>'
@@ -499,9 +499,16 @@ function applyFc(n){
     });
 }
 tabHooks.ports={
-  enter:function(){statusPoller.start();buildPorts();buildFc()},
+  enter:function(){statusPoller.start();buildPorts()},
   leave:function(){statusPoller.stop()},
   status:portsStatus,
+};
+/* flow-control tab: the status poller supplies S.ports; buildFc no-ops
+ * once the table exists, so the per-port fc queries fire only once */
+tabHooks.fc={
+  enter:function(){statusPoller.start();buildFc()},
+  leave:function(){statusPoller.stop()},
+  status:buildFc,
 };
 
 /* ============================================================
