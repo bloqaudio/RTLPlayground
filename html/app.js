@@ -389,6 +389,7 @@ function buildPorts(){
     tr.insertCell().textContent=p.portNum+(p.isSFP?" (SFP)":"");
     tr.insertCell().appendChild(h("input",{class:"in",id:"pname"+i,size:"9",maxlength:"15",value:p.name||"",placeholder:"—"}));
     tr.insertCell().id="plink"+i;
+    var mc=tr.insertCell();mc.id="pmac"+i;mc.className="mono";mc.textContent="—";
     tr.insertCell().appendChild(spd);
     var sw=h("span",{class:"switch"},[h("input",{type:"checkbox",id:"pen"+i}),h("i")]);
     sw.firstChild.checked=!!p.enabled;
@@ -407,8 +408,10 @@ function loadMtu(){
     });
   });
 }
+var _macTick=0;
 function portsStatus(){
   buildPorts();
+  if(++_macTick%10===0)portsMacs(); /* refresh learned MACs ~every 10 polls */
   S.ports.forEach(function(p){
     var i=p.portNum-1,el=$("plink"+i);
     if(el)el.innerHTML=!p.enabled?'<span class="badge">off</span>'
@@ -498,8 +501,25 @@ function applyFc(n){
       postCmd("fc "+mode+" "+n).then(function(){fcRefresh(n)}).catch(function(){});
     });
 }
+/* connected-device column: MACs the switch has learned on each port */
+function portsMacs(){
+  l2Load().then(function(all){
+    var by={};
+    all.forEach(function(e){
+      if(e.pport==="CPU")return;
+      (by[e.pport]=by[e.pport]||[]).push(e.mac);
+    });
+    S.ports.forEach(function(p){
+      var el=$("pmac"+(p.portNum-1));
+      if(!el)return;
+      var m=by[p.portNum]||[];
+      el.textContent=!m.length?"—":m[0]+(m.length>1?" +"+(m.length-1):"");
+      el.title=m.join("\n");
+    });
+  }).catch(function(){});
+}
 tabHooks.ports={
-  enter:function(){statusPoller.start();buildPorts()},
+  enter:function(){statusPoller.start();needPorts(function(){buildPorts();portsMacs()})},
   leave:function(){statusPoller.stop()},
   status:portsStatus,
 };
@@ -781,12 +801,14 @@ tabHooks.vlan={
  * MAC table (L2)
  * ============================================================ */
 var l2Rows=[];
-function l2Fetch(){
-  $("l2count").textContent="loading…";
+/* walk the paginated L2 table; resolves with all entries (pport = user
+ * port number, or "CPU") — shared by the MAC-table tab and the
+ * connected-device column on the Ports tab */
+function l2Load(){
   var seen={},all=[],idx=0,guard=0;
   function step(){
     return getJSON("/l2.json?idx="+idx).then(function(s){
-      if(!s.length)return finish();
+      if(!s.length)return all;
       var wrapped=false;
       s.forEach(function(e){
         e.idx=parseInt(e.idx,16);
@@ -797,19 +819,22 @@ function l2Fetch(){
         e.pport=e.port===9?"CPU":S.logToPhys[e.port];
         all.push(e);
       });
-      if(wrapped||++guard>140)return finish();
+      if(wrapped||++guard>140)return all;
       idx=s[s.length-1].idx+1;
       return step();
     });
   }
-  function finish(){
+  return step();
+}
+function l2Fetch(){
+  $("l2count").textContent="loading…";
+  return l2Load().then(function(all){
     all.sort(function(a,b){
       return(a.pport>b.pport)-(a.pport<b.pport)||(a.mac>b.mac)-(a.mac<b.mac);
     });
     l2Rows=all;
     l2Render();
-  }
-  return step().catch(function(){$("l2count").textContent="load failed"});
+  }).catch(function(){$("l2count").textContent="load failed"});
 }
 function l2Render(){
   var f=$("l2filter").value.toLowerCase();
