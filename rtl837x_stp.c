@@ -9,8 +9,10 @@
 // #define DEBUG
 
 #include <stdint.h>
-#include <string.h>
-#include "rtl837x_common.h"
+
+#pragma codeseg BANK2
+
+#include "rtl837x_common.h"	/* declares the project's memcpy */
 #include "rtl837x_sfr.h"
 #include "rtl837x_regs.h"
 #include "rtl837x_stp.h"
@@ -31,7 +33,6 @@ extern __xdata uint16_t management_vlan;
 __xdata uint16_t stp_bridge_prio;
 
 static __xdata uint16_t last_tick16;
-static __xdata struct rstp_bpdu bpdu_in;
 
 /*
  * Frame offsets.  RX frames carry the 8-byte RTL tag plus a 4-byte VLAN
@@ -52,10 +53,11 @@ static const uint8_t speed_class_map[8] = {0, 1, 2, 2, 5, 3, 4, 4};
 void rstp_platform_state(uint8_t port, uint8_t state)
 {
 	/* 2-bit fields: 00 disable, 01 blocking, 10 learning, 11 fwd */
-	uint8_t hw = state == RSTP_S_FORWARDING ? 0b11
-		   : state == RSTP_S_LEARNING ? 0b10 : 0b01;
-	uint8_t idx = 3 - (port >> 2);
-	uint8_t sh = (port << 1) & 0x7;
+	static __xdata uint8_t hw, idx, sh;
+	hw = state == RSTP_S_FORWARDING ? 0b11
+	   : state == RSTP_S_LEARNING ? 0b10 : 0b01;
+	idx = 3 - (port >> 2);
+	sh = (port << 1) & 0x7;
 
 	reg_read_m(RTL837X_MSTP_STATES);
 	sfr_data[idx] = (sfr_data[idx] & ~(0b11 << sh)) | (hw << sh);
@@ -72,14 +74,17 @@ void rstp_platform_flush(void)
 	port_l2_forget();
 }
 
-void rstp_platform_tx(uint8_t port, uint8_t type, uint8_t flags,
-		      __xdata uint8_t *vec)
+void rstp_platform_tx(uint8_t port)
 {
-	/* frame content starts after the 12-byte TX DMA descriptor */
-	__xdata uint8_t *f = uip_buf + RTL_FRAME_DESC_SIZE;
-	uint8_t is_rst = type == RSTP_BPDU_RST;
-	uint16_t saved_mgmt_vlan;
-	uint8_t body;	/* LLC payload length */
+	/* frame content starts after the 12-byte TX DMA descriptor;
+	 * type/flags/vector arrive in the rstp_tx_* globals */
+	static __xdata uint8_t * __xdata f;
+	static __xdata uint8_t is_rst, body, type;
+	static __xdata uint16_t saved_mgmt_vlan;
+
+	f = uip_buf + RTL_FRAME_DESC_SIZE;
+	type = rstp_tx_type;
+	is_rst = type == RSTP_BPDU_RST;
 
 	/* DA 01:80:c2:00:00:00, SA = bridge MAC */
 	f[0] = 0x01; f[1] = 0x80; f[2] = 0xc2; f[3] = f[4] = f[5] = 0x00;
@@ -101,8 +106,8 @@ void rstp_platform_tx(uint8_t port, uint8_t type, uint8_t flags,
 	if (type == RSTP_BPDU_TCN) {
 		uip_len = 29;
 	} else {
-		f[29] = flags;
-		memcpy(f + 30, vec, RSTP_VEC_LEN);	/* root/cost/bridge/port */
+		f[29] = rstp_tx_flags;
+		memcpy(f + 30, rstp_tx_vec, RSTP_VEC_LEN); /* root/cost/bridge/port */
 		/* times, 1/256 s units: age, max age 20, hello 2, fwd 15.
 		 * age: 0 as root, one hop otherwise (see rstp.c notes) */
 		f[52] = rstp_root_port == 0xff ? 0 : 1; f[53] = 0;
@@ -132,7 +137,8 @@ void rstp_platform_tx(uint8_t port, uint8_t type, uint8_t flags,
 /* Called from the main loop for frames to 01:80:c2:00:00:00 */
 void stp_in(void) __banked
 {
-	uint8_t port = uip_buf[RX_PORT_NIBBLE] & 0x0f;
+	static __xdata uint8_t port;
+	port = uip_buf[RX_PORT_NIBBLE] & 0x0f;
 
 	/* consumed either way; TX happens via rstp_platform_tx directly */
 	uip_len = 0;
@@ -143,28 +149,28 @@ void stp_in(void) __banked
 	if (uip_buf[RX_LLC + 3] || uip_buf[RX_LLC + 4])	/* protocol id */
 		return;
 
-	bpdu_in.type = uip_buf[RX_LLC + 6];
-	if (bpdu_in.type == RSTP_BPDU_TCN) {
-		bpdu_in.flags = 0;
-	} else if (bpdu_in.type == RSTP_BPDU_CONFIG
-		   || bpdu_in.type == RSTP_BPDU_RST) {
-		bpdu_in.flags = uip_buf[RX_LLC + 7];
-		memcpy(bpdu_in.vec, &uip_buf[RX_LLC + 8], RSTP_VEC_LEN);
+	rstp_bpdu_in.type = uip_buf[RX_LLC + 6];
+	if (rstp_bpdu_in.type == RSTP_BPDU_TCN) {
+		rstp_bpdu_in.flags = 0;
+	} else if (rstp_bpdu_in.type == RSTP_BPDU_CONFIG
+		   || rstp_bpdu_in.type == RSTP_BPDU_RST) {
+		rstp_bpdu_in.flags = uip_buf[RX_LLC + 7];
+		memcpy(rstp_bpdu_in.vec, &uip_buf[RX_LLC + 8], RSTP_VEC_LEN);
 	} else {
 		return;
 	}
 #ifdef DEBUG
 	print_string("BPDU port "); print_byte(port);
-	print_string(" type "); print_byte(bpdu_in.type);
-	print_string(" flags "); print_byte(bpdu_in.flags); write_char('\n');
+	print_string(" type "); print_byte(rstp_bpdu_in.type);
+	print_string(" flags "); print_byte(rstp_bpdu_in.flags); write_char('\n');
 #endif
-	rstp_rx(port, &bpdu_in);
+	rstp_rx(port);
 }
 
 /* poll link state + speed for all ports, feed changes to the core */
 static void poll_links(void)
 {
-	uint8_t sts, sts8, speeds[4], speeds8;
+	static __xdata uint8_t sts, sts8, speeds[4], speeds8;
 
 	reg_read_m(RTL837X_REG_LINKS_STS);
 	sts = sfr_data[1];		/* ports 0-7, one bit each */
@@ -175,15 +181,16 @@ static void poll_links(void)
 	reg_read_m(RTL837X_REG_LINKS_89);
 	speeds8 = sfr_data[3];
 
-	for (uint8_t p = 0; p <= machine.max_port; p++) {
-		uint8_t up = p < 8 ? (sts >> p) & 1 : sts8;
+	static __xdata uint8_t up, nib, p;
+	for (p = 0; p <= machine.max_port; p++) {
+		up = p < 8 ? (sts >> p) & 1 : sts8;
 		if (!up) {
-			rstp_link(p, 0, 0);
+			rstp_link(p, 0);
 			continue;
 		}
-		uint8_t nib = p < 8 ? speeds[3 - (p >> 1)] : speeds8;
+		nib = p < 8 ? speeds[3 - (p >> 1)] : speeds8;
 		nib = (p & 1) ? (nib >> 4) : (nib & 0x0f);
-		rstp_link(p, 1, speed_class_map[nib & 0x7]);
+		rstp_link(p, RSTP_LINK_UP | speed_class_map[nib & 0x7]);
 	}
 }
 
@@ -191,7 +198,8 @@ static void poll_links(void)
  * tick off the system tick counter instead of loop iterations */
 void stp_timers(void) __banked
 {
-	uint16_t now = (uint16_t)ticks;
+	static __xdata uint16_t now;
+	now = (uint16_t)ticks;
 
 	if ((uint16_t)(now - last_tick16) < SYS_TICK_HZ / 2)
 		return;
@@ -218,7 +226,11 @@ void stp_setup(void) __banked
 		sfr_data[3 - (i >> 2)] |= 0b01 << ((i << 1) & 0x7);
 	reg_write_m(RTL837X_MSTP_STATES);
 
-	rstp_init(machine.max_port + 1, uip_ethaddr.addr, stp_bridge_prio);
+	rstp_bridge_id[0] = stp_bridge_prio >> 8;
+	rstp_bridge_id[1] = stp_bridge_prio & 0xff;
+	memcpy(rstp_bridge_id + 2, uip_ethaddr.addr, 6);
+	rstp_nports = machine.max_port + 1;
+	rstp_init();
 	last_tick16 = (uint16_t)ticks;
 	poll_links();	/* feed current link state right away */
 }
@@ -254,8 +266,10 @@ void stp_status(void) __banked
 		print_byte(machine.log_to_phys_port[rstp_root_port]);
 		write_char('\n');
 	}
-	for (uint8_t p = machine.min_port; p <= machine.max_port; p++) {
-		__xdata struct rstp_port *o = &rstp_ports[p];
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t p;
+	for (p = machine.min_port; p <= machine.max_port; p++) {
+		o = &rstp_ports[p];
 		print_string("Port ");
 		print_byte(machine.log_to_phys_port[p]);
 		print_string(": ");

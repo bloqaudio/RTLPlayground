@@ -11,14 +11,57 @@
  * This code is in the Public Domain
  */
 #include <stdint.h>
-#include <string.h>
 #include "rstp.h"
+
+#ifdef __SDCC
+#pragma codeseg BANK2
+#endif
+
+/* Tiny byte helpers.  The project's memcpy/memset declarations clash
+ * with the SDCC libc ones, and every byte of function parameters lands
+ * in the (exhausted) 128-byte internal RAM, so the mutating helpers
+ * take their operands via __xdata staging globals and macros. */
+static __xdata uint8_t * __xdata bp_d;
+static __xdata uint8_t * __xdata bp_s;
+static __xdata uint8_t bp_n, bp_v;
+
+static void bcopy_(void)
+{
+	while (bp_n--)
+		*bp_d++ = *bp_s++;
+}
+
+static void bset_(void)
+{
+	while (bp_n--)
+		*bp_d++ = bp_v;
+}
+
+static int8_t bcmp_(void)
+{
+	while (bp_n--) {
+		if (*bp_d != *bp_s)
+			return *bp_d < *bp_s ? -1 : 1;
+		bp_d++; bp_s++;
+	}
+	return 0;
+}
+
+#define BCOPY(d, s, n) do { bp_d = (d); bp_s = (s); bp_n = (n); bcopy_(); } while (0)
+#define BSET(d, v, n)  do { bp_d = (d); bp_v = (v); bp_n = (n); bset_(); } while (0)
+#define COSTADD(d, s)  do { bp_d = (d); bp_s = (s); cost_add_(); } while (0)
+/* comma expression: usable inline in conditions */
+#define BCMP(a, b, n)  (bp_d = (a), bp_s = (b), bp_n = (n), bcmp_())
 
 __xdata struct rstp_port rstp_ports[RSTP_MAX_PORTS];
 __xdata uint8_t rstp_bridge_id[8];
+__xdata uint8_t rstp_nports;
 __xdata uint8_t rstp_root_vec[RSTP_VEC_LEN];
 __xdata uint8_t rstp_root_port;
-static __xdata uint8_t rstp_nports;
+__xdata struct rstp_bpdu rstp_bpdu_in;
+__xdata uint8_t rstp_tx_type;
+__xdata uint8_t rstp_tx_flags;
+__xdata uint8_t rstp_tx_vec[RSTP_VEC_LEN];
 static __xdata uint8_t tcn_pending;	/* STP-compat: TCN owed on root port */
 
 /* timer values, 500 ms units */
@@ -30,7 +73,8 @@ static __xdata uint8_t tcn_pending;	/* STP-compat: TCN owed on root port */
 #define T_EDGE		6	/* 3 s of BPDU silence -> auto edge */
 
 /* 802.1t path costs by speed class 0..5 = 10M 100M 1G 2.5G 5G 10G */
-static const uint8_t path_cost[6][4] = {
+/* in __xdata (not __code) so the byte helpers can point at it */
+static __xdata uint8_t path_cost[6][4] = {
 	{0x00, 0x1e, 0x84, 0x80},	/* 10M   2,000,000 */
 	{0x00, 0x03, 0x0d, 0x40},	/* 100M    200,000 */
 	{0x00, 0x00, 0x4e, 0x20},	/* 1G       20,000 */
@@ -39,36 +83,27 @@ static const uint8_t path_cost[6][4] = {
 	{0x00, 0x00, 0x07, 0xd0},	/* 10G       2,000 */
 };
 
-static int8_t vcmp(__xdata uint8_t *a, __xdata uint8_t *b, uint8_t len)
-{
-	for (uint8_t i = 0; i < len; i++) {
-		if (a[i] < b[i])
-			return -1;
-		if (a[i] > b[i])
-			return 1;
-	}
-	return 0;
-}
-
-/* dst[0..3] += add[0..3], both big-endian 32 bit */
-static void cost_add(__xdata uint8_t *dst, __xdata uint8_t *add)
+/* bp_d[0..3] += bp_s[0..3], both big-endian 32 bit (use COSTADD) */
+static void cost_add_(void)
 {
 	uint16_t s = 0;
 	for (int8_t i = 3; i >= 0; i--) {
-		s += (uint16_t)dst[i] + add[i];
-		dst[i] = s & 0xff;
+		s += (uint16_t)bp_d[i] + bp_s[i];
+		bp_d[i] = s & 0xff;
 		s >>= 8;
 	}
 }
 
-/* the vector this bridge advertises on port p:
+/* the vector this bridge advertises on port p, left in ov[]:
  * {elected root, our root path cost, our bridge id, our port id} */
-static void own_vec(uint8_t p, __xdata uint8_t *out)
+static __xdata uint8_t ov[RSTP_VEC_LEN];
+
+static void own_vec(uint8_t p)
 {
-	memcpy(out, rstp_root_vec, 12);		/* root id + cost */
-	memcpy(out + V_BRIDGE, rstp_bridge_id, 8);
-	out[V_PORT] = 0x80;
-	out[V_PORT + 1] = p + 1;
+	BCOPY(ov, rstp_root_vec, 12);		/* root id + cost */
+	BCOPY(ov + V_BRIDGE, rstp_bridge_id, 8);
+	ov[V_PORT] = 0x80;
+	ov[V_PORT + 1] = p + 1;
 }
 
 static void set_state(uint8_t p, uint8_t st)
@@ -82,9 +117,11 @@ static void set_state(uint8_t p, uint8_t st)
 /* topology change: flush and start TC on every other active non-edge port */
 static void tc_detected(uint8_t p)
 {
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t i;
 	rstp_platform_flush();
-	for (uint8_t i = 0; i < rstp_nports; i++) {
-		__xdata struct rstp_port *o = &rstp_ports[i];
+	for (i = 0; i < rstp_nports; i++) {
+		o = &rstp_ports[i];
 		if (i == p || !o->link || o->oper_edge)
 			continue;
 		if (o->role == RSTP_R_ROOT || o->role == RSTP_R_DESIGNATED) {
@@ -109,8 +146,10 @@ static void fwd_transition(uint8_t p)
  * downstream peer */
 static void sync_others(uint8_t except)
 {
-	for (uint8_t i = 0; i < rstp_nports; i++) {
-		__xdata struct rstp_port *o = &rstp_ports[i];
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t i;
+	for (i = 0; i < rstp_nports; i++) {
+		o = &rstp_ports[i];
 		if (i == except || !o->link || o->oper_edge)
 			continue;
 		if (o->role == RSTP_R_DESIGNATED && !o->agreed
@@ -128,34 +167,36 @@ static void tx_port(uint8_t p);
 static void reelect(void)
 {
 	__xdata static uint8_t cand[RSTP_VEC_LEN];
-	__xdata static uint8_t desig[RSTP_VEC_LEN];
-	uint8_t old_root_port = rstp_root_port;
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t old_root_port;
+	static __xdata uint8_t new_role;
+	static __xdata uint8_t p;
+	old_root_port = rstp_root_port;
 
 	/* our own bridge vector: we are root */
-	memcpy(rstp_root_vec, rstp_bridge_id, 8);
-	memset(rstp_root_vec + V_COST, 0, 4);
-	memcpy(rstp_root_vec + V_BRIDGE, rstp_bridge_id, 8);
+	BCOPY(rstp_root_vec, rstp_bridge_id, 8);
+	BSET(rstp_root_vec + V_COST, 0, 4);
+	BCOPY(rstp_root_vec + V_BRIDGE, rstp_bridge_id, 8);
 	rstp_root_vec[V_PORT] = rstp_root_vec[V_PORT + 1] = 0;
 	rstp_root_port = 0xff;
 
 	/* best root path via any port with live info from another bridge */
-	for (uint8_t p = 0; p < rstp_nports; p++) {
-		__xdata struct rstp_port *o = &rstp_ports[p];
+	for (p = 0; p < rstp_nports; p++) {
+		o = &rstp_ports[p];
 		if (!o->link || !o->rcvd_info_while)
 			continue;
-		if (!memcmp(o->vec + V_BRIDGE, rstp_bridge_id, 8))
+		if (!BCMP(o->vec + V_BRIDGE, rstp_bridge_id, 8))
 			continue;	/* our own BPDU looped back */
-		memcpy(cand, o->vec, RSTP_VEC_LEN);
-		cost_add(cand + V_COST, o->cost);
-		if (vcmp(cand, rstp_root_vec, RSTP_VEC_LEN) < 0) {
-			memcpy(rstp_root_vec, cand, RSTP_VEC_LEN);
+		BCOPY(cand, o->vec, RSTP_VEC_LEN);
+		COSTADD(cand + V_COST, o->cost);
+		if (BCMP(cand, rstp_root_vec, RSTP_VEC_LEN) < 0) {
+			BCOPY(rstp_root_vec, cand, RSTP_VEC_LEN);
 			rstp_root_port = p;
 		}
 	}
 
-	for (uint8_t p = 0; p < rstp_nports; p++) {
-		__xdata struct rstp_port *o = &rstp_ports[p];
-		uint8_t new_role;
+	for (p = 0; p < rstp_nports; p++) {
+		o = &rstp_ports[p];
 		if (!o->link) {
 			o->role = RSTP_R_DISABLED;
 			continue;
@@ -163,11 +204,11 @@ static void reelect(void)
 		if (p == rstp_root_port) {
 			new_role = RSTP_R_ROOT;
 		} else {
-			own_vec(p, desig);
+			own_vec(p);
 			if (o->rcvd_info_while
-			    && vcmp(o->vec, desig, RSTP_VEC_LEN) < 0)
-				new_role = memcmp(o->vec + V_BRIDGE,
-						  rstp_bridge_id, 8)
+			    && BCMP(o->vec, ov, RSTP_VEC_LEN) < 0)
+				new_role = BCMP(o->vec + V_BRIDGE,
+						 rstp_bridge_id, 8)
 					   ? RSTP_R_ALTERNATE : RSTP_R_BACKUP;
 			else
 				new_role = RSTP_R_DESIGNATED;
@@ -175,9 +216,9 @@ static void reelect(void)
 
 		if (new_role == RSTP_R_DESIGNATED) {
 			/* we own this segment: our info replaces held info */
-			own_vec(p, desig);
-			if (memcmp(o->vec, desig, RSTP_VEC_LEN)) {
-				memcpy(o->vec, desig, RSTP_VEC_LEN);
+			own_vec(p);
+			if (BCMP(o->vec, ov, RSTP_VEC_LEN)) {
+				BCOPY(o->vec, ov, RSTP_VEC_LEN);
 				o->new_info = 1;
 				o->agreed = 0;
 			}
@@ -215,30 +256,37 @@ static void reelect(void)
 	/* answer an outstanding proposal on the root port: sync, forward,
 	 * and send the agreement immediately (this is the rapid wave) */
 	if (rstp_root_port != 0xff) {
-		__xdata struct rstp_port *r = &rstp_ports[rstp_root_port];
-		if (r->proposed) {
-			r->proposed = 0;
+		o = &rstp_ports[rstp_root_port];
+		if (o->proposed) {
+			o->proposed = 0;
 			sync_others(rstp_root_port);
-			if (r->state != RSTP_S_FORWARDING)
+			if (o->state != RSTP_S_FORWARDING)
 				fwd_transition(rstp_root_port);
-			r->new_info = 2;	/* 2: agreement flag */
+			o->new_info = 2;	/* 2: agreement flag */
 			tx_port(rstp_root_port);
-			r->new_info = 0;
-			r->hello_when = T_HELLO;
+			o->new_info = 0;
+			o->hello_when = T_HELLO;
 		}
 	}
 }
 
-/* build + hand one BPDU to the platform */
+/* build + hand one BPDU to the platform via the tx globals */
 static void tx_port(uint8_t p)
 {
-	__xdata struct rstp_port *o = &rstp_ports[p];
-	uint8_t flags = 0;
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t flags;
+	o = &rstp_ports[p];
+	flags = 0;
+
+	BCOPY(rstp_tx_vec, o->vec, RSTP_VEC_LEN);
 
 	if (o->role == RSTP_R_ROOT && !o->send_rstp) {
 		/* STP-compat upstream: TC is signalled with a TCN */
-		if (tcn_pending)
-			rstp_platform_tx(p, RSTP_BPDU_TCN, 0, o->vec);
+		if (tcn_pending) {
+			rstp_tx_type = RSTP_BPDU_TCN;
+			rstp_tx_flags = 0;
+			rstp_platform_tx(p);
+		}
 		return;
 	}
 
@@ -251,7 +299,9 @@ static void tx_port(uint8_t p)
 			flags |= RSTP_F_TCACK;
 			o->tc_ack = 0;
 		}
-		rstp_platform_tx(p, RSTP_BPDU_CONFIG, flags, o->vec);
+		rstp_tx_type = RSTP_BPDU_CONFIG;
+		rstp_tx_flags = flags;
+		rstp_platform_tx(p);
 		return;
 	}
 
@@ -270,20 +320,23 @@ static void tx_port(uint8_t p)
 		    && !o->agreed)
 			flags |= RSTP_F_PROPOSAL;
 	}
-	rstp_platform_tx(p, RSTP_BPDU_RST, flags, o->vec);
+	rstp_tx_type = RSTP_BPDU_RST;
+	rstp_tx_flags = flags;
+	rstp_platform_tx(p);
 }
 
-void rstp_init(uint8_t nports, __xdata uint8_t *mac, uint16_t prio) __banked
+void rstp_init(void) __banked
 {
-	rstp_nports = nports > RSTP_MAX_PORTS ? RSTP_MAX_PORTS : nports;
-	rstp_bridge_id[0] = prio >> 8;
-	rstp_bridge_id[1] = prio & 0xff;
-	memcpy(rstp_bridge_id + 2, mac, 6);
+	/* rstp_bridge_id and rstp_nports are filled in by the glue */
+	if (rstp_nports > RSTP_MAX_PORTS)
+		rstp_nports = RSTP_MAX_PORTS;
 	tcn_pending = 0;
-	for (uint8_t p = 0; p < rstp_nports; p++) {
-		__xdata struct rstp_port *o = &rstp_ports[p];
-		uint8_t admin = o->admin_edge;	/* survives re-init */
-		memset(o, 0, sizeof(*o));
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t admin, p;
+	for (p = 0; p < rstp_nports; p++) {
+		o = &rstp_ports[p];
+		admin = o->admin_edge;	/* survives re-init */
+		BSET((__xdata uint8_t *)o, 0, sizeof(*o));
 		o->admin_edge = admin;
 		o->role = RSTP_R_DISABLED;
 		o->state = RSTP_S_DISCARDING;
@@ -292,15 +345,19 @@ void rstp_init(uint8_t nports, __xdata uint8_t *mac, uint16_t prio) __banked
 	reelect();
 }
 
-void rstp_link(uint8_t port, uint8_t up, uint8_t speed_class) __banked
+void rstp_link(uint8_t port, uint8_t up_speed) __banked
 {
-	__xdata struct rstp_port *o = &rstp_ports[port];
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t up, speed_class;
+	o = &rstp_ports[port];
+	up = up_speed & RSTP_LINK_UP;
+	speed_class = up_speed & 0x07;
 	if (port >= rstp_nports)
 		return;
 	if (up && o->link) {
 		/* speed change without a flap: only the path cost moves */
-		if (memcmp(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4)) {
-			memcpy(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4);
+		if (BCMP(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4)) {
+			BCOPY(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4);
 			reelect();
 		}
 		return;
@@ -315,7 +372,7 @@ void rstp_link(uint8_t port, uint8_t up, uint8_t speed_class) __banked
 	o->oper_edge = 0;
 	set_state(port, RSTP_S_DISCARDING);
 	if (up) {
-		memcpy(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4);
+		BCOPY(o->cost, path_cost[speed_class > 5 ? 5 : speed_class], 4);
 		o->mdelay_while = T_MIGRATE;
 		o->hello_when = 1;	/* BPDU on the next tick */
 		if (o->admin_edge == RSTP_EDGE_ON)
@@ -328,7 +385,8 @@ void rstp_link(uint8_t port, uint8_t up, uint8_t speed_class) __banked
 
 void rstp_set_edge(uint8_t port, uint8_t mode) __banked
 {
-	__xdata struct rstp_port *o = &rstp_ports[port];
+	static __xdata struct rstp_port * __xdata o;
+	o = &rstp_ports[port];
 	if (port >= rstp_nports)
 		return;
 	o->admin_edge = mode;
@@ -341,10 +399,13 @@ void rstp_set_edge(uint8_t port, uint8_t mode) __banked
 	reelect();
 }
 
-void rstp_rx(uint8_t port, __xdata struct rstp_bpdu *b) __banked
+void rstp_rx(uint8_t port) __banked
 {
-	__xdata struct rstp_port *o = &rstp_ports[port];
-	uint8_t role;
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata struct rstp_bpdu * __xdata b;
+	static __xdata uint8_t role;
+	o = &rstp_ports[port];
+	b = &rstp_bpdu_in;
 
 	if (port >= rstp_nports || !o->link)
 		return;
@@ -393,13 +454,15 @@ void rstp_rx(uint8_t port, __xdata struct rstp_bpdu *b) __banked
 	}
 
 	if (role == RSTP_F_ROLE_DESIG) {
-		int8_t c = vcmp(b->vec, o->vec, RSTP_VEC_LEN);
-		uint8_t same_sender = !memcmp(b->vec + V_BRIDGE,
-					      o->vec + V_BRIDGE, 10);
+		static __xdata int8_t c;
+		static __xdata uint8_t same_sender;
+		c = BCMP(b->vec, o->vec, RSTP_VEC_LEN);
+		same_sender = !BCMP(b->vec + V_BRIDGE,
+				    o->vec + V_BRIDGE, 10);
 		if (c < 0 || (same_sender && c)) {
 			/* superior (or changed info from the same
 			 * designated bridge+port): adopt it */
-			memcpy(o->vec, b->vec, RSTP_VEC_LEN);
+			BCOPY(o->vec, b->vec, RSTP_VEC_LEN);
 			o->rcvd_info_while = T_INFO_AGE;
 			o->proposed = (b->flags & RSTP_F_PROPOSAL) ? 1 : 0;
 			o->agreed = 0;
@@ -427,8 +490,10 @@ void rstp_rx(uint8_t port, __xdata struct rstp_bpdu *b) __banked
 
 void rstp_tick500(void) __banked
 {
-	for (uint8_t p = 0; p < rstp_nports; p++) {
-		__xdata struct rstp_port *o = &rstp_ports[p];
+	static __xdata struct rstp_port * __xdata o;
+	static __xdata uint8_t p;
+	for (p = 0; p < rstp_nports; p++) {
+		o = &rstp_ports[p];
 		if (!o->link)
 			continue;
 

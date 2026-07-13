@@ -91,21 +91,33 @@ struct rstp_port {
 };
 
 extern __xdata struct rstp_port rstp_ports[RSTP_MAX_PORTS];
-extern __xdata uint8_t rstp_bridge_id[8];
+extern __xdata uint8_t rstp_bridge_id[8];	/* set by glue before init */
+extern __xdata uint8_t rstp_nports;		/* set by glue before init */
 extern __xdata uint8_t rstp_root_vec[RSTP_VEC_LEN];
 extern __xdata uint8_t rstp_root_port;	/* 0xff: we are root */
 
+/* Internal (128 B) RAM on the 8051 is nearly exhausted, so this API
+ * avoids multi-byte parameters (SDCC places them in DSEG): inputs and
+ * outputs beyond one byte travel through the __xdata globals below. */
+extern __xdata struct rstp_bpdu rstp_bpdu_in;	/* glue fills, then rx */
+extern __xdata uint8_t rstp_tx_type;		/* core fills before tx */
+extern __xdata uint8_t rstp_tx_flags;
+extern __xdata uint8_t rstp_tx_vec[RSTP_VEC_LEN];
+
+/* rstp_link up_speed: bit 7 = link up, bits 0-2 = speed class 0-5
+ * (10M 100M 1G 2.5G 5G 10G) */
+#define RSTP_LINK_UP	0x80
+
 /* core API (called by platform glue) */
-void rstp_init(uint8_t nports, __xdata uint8_t *mac, uint16_t prio) __banked;
-void rstp_link(uint8_t port, uint8_t up, uint8_t speed_class) __banked;
-void rstp_rx(uint8_t port, __xdata struct rstp_bpdu *b) __banked;
+void rstp_init(void) __banked;
+void rstp_link(uint8_t port, uint8_t up_speed) __banked;
+void rstp_rx(uint8_t port) __banked;
 void rstp_tick500(void) __banked;
 void rstp_set_edge(uint8_t port, uint8_t mode) __banked;
 
 /* provided by platform glue */
 void rstp_platform_state(uint8_t port, uint8_t state);
-void rstp_platform_tx(uint8_t port, uint8_t type, uint8_t flags,
-		      __xdata uint8_t *vec);
+void rstp_platform_tx(uint8_t port);
 void rstp_platform_flush(void);
 
 #endif

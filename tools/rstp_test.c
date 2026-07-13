@@ -22,13 +22,13 @@ static int txn;
 
 void rstp_platform_state(uint8_t port, uint8_t state) { hw_state[port] = state; }
 void rstp_platform_flush(void) { flush_count++; }
-void rstp_platform_tx(uint8_t port, uint8_t type, uint8_t flags, uint8_t *vec)
+void rstp_platform_tx(uint8_t port)
 {
 	if (txn < 64) {
 		txlog[txn].port = port;
-		txlog[txn].type = type;
-		txlog[txn].flags = flags;
-		memcpy(txlog[txn].vec, vec, RSTP_VEC_LEN);
+		txlog[txn].type = rstp_tx_type;
+		txlog[txn].flags = rstp_tx_flags;
+		memcpy(txlog[txn].vec, rstp_tx_vec, RSTP_VEC_LEN);
 		txn++;
 	}
 }
@@ -57,12 +57,11 @@ static void mkvec(uint8_t *vec, uint16_t rprio, const uint8_t *rmac,
 
 static void rx(uint8_t port, uint8_t type, uint8_t flags, uint8_t *vec)
 {
-	static struct rstp_bpdu b;
-	b.type = type;
-	b.flags = flags;
+	rstp_bpdu_in.type = type;
+	rstp_bpdu_in.flags = flags;
 	if (vec)
-		memcpy(b.vec, vec, RSTP_VEC_LEN);
-	rstp_rx(port, &b);
+		memcpy(rstp_bpdu_in.vec, vec, RSTP_VEC_LEN);
+	rstp_rx(port);
 }
 
 static void ticks_n(int n) { while (n--) rstp_tick500(); }
@@ -72,7 +71,10 @@ static void fresh(void)
 	memset(rstp_ports, 0, sizeof(rstp_ports));
 	memset(hw_state, 0, sizeof(hw_state));
 	flush_count = txn = 0;
-	rstp_init(9, MAC_SELF, 0x8000);
+	rstp_bridge_id[0] = 0x80; rstp_bridge_id[1] = 0x00;
+	memcpy(rstp_bridge_id + 2, MAC_SELF, 6);
+	rstp_nports = 9;
+	rstp_init();
 }
 
 static int sent(uint8_t port, uint8_t type, uint8_t flags_all, int since)
@@ -91,7 +93,7 @@ static void t_slow_transitions(void)
 {
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
 	CHECK(rstp_ports[0].role == RSTP_R_DESIGNATED, "designated");
 	CHECK(hw_state[0] == RSTP_S_DISCARDING, "starts discarding");
 	ticks_n(T_FWD_DELAY);
@@ -105,7 +107,7 @@ static void t_slow_transitions(void)
 static void t_auto_edge(void)
 {
 	fresh();
-	rstp_link(0, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
 	CHECK(hw_state[0] == RSTP_S_DISCARDING, "starts discarding");
 	ticks_n(T_EDGE);
 	CHECK(rstp_ports[0].oper_edge == 1, "auto edge set");
@@ -126,8 +128,8 @@ static void t_root_election(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);	/* 1G: cost 20000 */
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);	/* 1G: cost 20000 */
+	rstp_link(1, RSTP_LINK_UP | 2);
 	mkvec(v, 0x1000, MAC_ROOT, 0, 0x1000, MAC_ROOT, 0x8001);
 	rx(0, RSTP_BPDU_RST, RSTP_F_ROLE_DESIG | RSTP_F_LEARNING | RSTP_F_FORWARDING, v);
 	CHECK(rstp_ports[0].role == RSTP_R_ROOT, "port 0 is root port");
@@ -150,8 +152,8 @@ static void t_proposal_agreement(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
+	rstp_link(1, RSTP_LINK_UP | 2);
 	/* get port 1 forwarding first (it must be cut by sync) */
 	ticks_n(2 * T_FWD_DELAY);
 	CHECK(hw_state[1] == RSTP_S_FORWARDING, "port 1 forwarding");
@@ -177,8 +179,8 @@ static void t_alternate_promotion(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
+	rstp_link(1, RSTP_LINK_UP | 2);
 	/* root reachable via both ports; port 0 cheaper sender */
 	mkvec(v, 0x1000, MAC_ROOT, 0, 0x1000, MAC_ROOT, 0x8001);
 	rx(0, RSTP_BPDU_RST, RSTP_F_ROLE_DESIG, v);
@@ -188,7 +190,7 @@ static void t_alternate_promotion(void)
 	CHECK(rstp_ports[1].role == RSTP_R_ALTERNATE, "port 1 alternate");
 	CHECK(hw_state[1] == RSTP_S_DISCARDING, "alternate discarding");
 	/* root port dies: alternate promotes rapidly */
-	rstp_link(0, 0, 0);
+	rstp_link(0, 0);
 	CHECK(rstp_ports[1].role == RSTP_R_ROOT, "alternate promoted");
 	CHECK(hw_state[1] == RSTP_S_FORWARDING, "promoted port forwards");
 }
@@ -200,8 +202,8 @@ static void t_backup(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
+	rstp_link(1, RSTP_LINK_UP | 2);
 	/* port 1 hears port 0's own advertisement (hub between them) */
 	mkvec(v, 0x8000, MAC_SELF, 0, 0x8000, MAC_SELF, 0x8001);
 	rx(1, RSTP_BPDU_RST, RSTP_F_ROLE_DESIG, v);
@@ -215,7 +217,7 @@ static void t_inferior_reply(void)
 	uint8_t v[RSTP_VEC_LEN];
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
 	int before = txn;
 	mkvec(v, 0xf000, MAC_PEER, 999999, 0xf000, MAC_PEER, 0x8003);
 	rx(0, RSTP_BPDU_RST, RSTP_F_ROLE_DESIG, v);
@@ -231,7 +233,7 @@ static void t_ageing(void)
 	uint8_t v[RSTP_VEC_LEN];
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
 	mkvec(v, 0x1000, MAC_ROOT, 0, 0x1000, MAC_ROOT, 0x8001);
 	rx(0, RSTP_BPDU_RST, RSTP_F_ROLE_DESIG, v);
 	CHECK(rstp_ports[0].role == RSTP_R_ROOT, "root elected");
@@ -247,8 +249,8 @@ static void t_tc(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
+	rstp_link(1, RSTP_LINK_UP | 2);
 	ticks_n(2 * T_FWD_DELAY);	/* both forwarding */
 	flush_count = 0;
 	int before = txn;
@@ -265,7 +267,7 @@ static void t_stp_compat(void)
 	uint8_t v[RSTP_VEC_LEN];
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
 	ticks_n(T_MIGRATE + 1);		/* migration delay over */
 	mkvec(v, 0x9000, MAC_PEER, 0, 0x9000, MAC_PEER, 0x8001);
 	rx(0, RSTP_BPDU_CONFIG, 0, v);
@@ -287,8 +289,8 @@ static void t_tcn_upstream(void)
 	fresh();
 	rstp_ports[0].admin_edge = RSTP_EDGE_OFF;
 	rstp_ports[1].admin_edge = RSTP_EDGE_OFF;
-	rstp_link(0, 1, 2);
-	rstp_link(1, 1, 2);
+	rstp_link(0, RSTP_LINK_UP | 2);
+	rstp_link(1, RSTP_LINK_UP | 2);
 	ticks_n(T_MIGRATE + 1);
 	/* STP root upstream on port 0 */
 	mkvec(v, 0x1000, MAC_ROOT, 0, 0x1000, MAC_ROOT, 0x8001);
