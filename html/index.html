@@ -263,6 +263,14 @@ button.danger{background:var(--bad);color:#fff;border-color:transparent}
           <tbody></tbody></table></div>
         <p class="small mut" style="margin-top:8px">SFP speed is set per slot and is not saved in the startup config.</p>
       </div>
+      <div class="card"><h2>Flow control <span class="hint">802.3x pause, copper ports</span></h2>
+        <div class="scrollx"><table class="t" id="fctable">
+          <thead><tr><th>Port</th><th>Current</th><th>Mode</th><th></th></tr></thead>
+          <tbody></tbody></table></div>
+        <p class="small mut" style="margin-top:8px">Auto follows the negotiated pause result (default).
+        On forces the port to obey received pause frames; Off forces it to ignore them.
+        Applying to a live port bounces the link for ~5&nbsp;s and renegotiates speed.</p>
+      </div>
     </section>
 
     <section class="tab" id="tab-stats">

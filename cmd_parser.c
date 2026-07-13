@@ -62,6 +62,9 @@ __xdata uint8_t cmd_buffer[CMD_BUF_SIZE];
 __xdata uint8_t cmd_available;
 
 __xdata	char save_cmd;
+// One-shot: a read-only command (e.g. `fc status`) sets this so it is not
+// recorded into cmd_history, which save-to-flash merges as pending config
+__xdata uint8_t skip_history;
 
 __xdata uint8_t ip[4];
 
@@ -1289,6 +1292,7 @@ void parse_fc(void)
 	}
 
 	if (cmd_compare(1, "status")) {
+		skip_history = 1;  // read-only: keep it out of the config history
 		if (port >= 0)
 			port_fc_status(port);
 		else
@@ -1735,7 +1739,7 @@ void cmd_parser(void) __banked
 		}
 
 
-		if (save_cmd && cmd_words_len) {
+		if (save_cmd && cmd_words_len && !skip_history) {
 			// Find end of the cmd-buffer, looking for the NULL-byte.
 			uint8_t i = cmd_words_b[cmd_words_len - 1];
 			do {
@@ -1751,6 +1755,7 @@ void cmd_parser(void) __banked
 				cmd_history[--p & CMD_HISTORY_MASK] = cmd_buffer[i];
 			} while (i);
 		}
+		skip_history = 0;
 	}
 }
 

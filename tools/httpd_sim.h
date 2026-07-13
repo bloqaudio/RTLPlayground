@@ -3,7 +3,7 @@
 
 #include <netinet/in.h>
 
-#define BUFFER_SIZE 24000
+#define BUFFER_SIZE 65536  // match the firmware asset limit (f_data.len is uint16)
 
 struct Server {
     int domain;
