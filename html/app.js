@@ -513,7 +513,10 @@ function portsMacs(){
       var el=$("pmac"+(p.portNum-1));
       if(!el)return;
       var m=by[p.portNum]||[];
-      el.textContent=!m.length?"—":m[0]+(m.length>1?" +"+(m.length-1):"");
+      /* only a single learned MAC is reliably the attached device;
+       * several means a switch/AP behind the port — don't imply one
+       * arbitrary MAC is "the" device, just count them */
+      el.textContent=!m.length?"—":(m.length===1?m[0]:m.length+" devices");
       el.title=m.join("\n");
     });
   }).catch(function(){});
