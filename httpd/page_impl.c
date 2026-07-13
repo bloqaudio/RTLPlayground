@@ -221,6 +221,16 @@ void sfp_send_data(uint8_t slot, uint8_t reg, uint8_t len)
 }
 
 
+// Plain-text hostname; served without authentication so the login page
+// can identify the device
+void send_hostname(void)
+{
+	slen = strtox(outbuf, HTTP_RESPONCE_TXT);
+	for (__xdata char *h = hostname; *h; h++)
+		outbuf[slen++] = *h;
+}
+
+
 void send_basic_info(void)
 {
 	slen = strtox(outbuf, HTTP_RESPONCE_JSON);

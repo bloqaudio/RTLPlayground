@@ -693,6 +693,13 @@ void launch(struct Server *server)
 					else
 						send_vlan(new_socket, vlan);
 					goto done;
+				} else if (!strncmp(&buffer[4], "/hostname ", 10)) {
+					// Unauthenticated on purpose, mirrors the firmware:
+					// the login page uses it to identify the device
+					char *response = "HTTP/1.1 200 OK\r\n"
+							 "Content-Type: text/plain\r\n\r\nsodola-sim";
+					write(new_socket, response, strlen(response));
+					goto done;
 				} else if (!strncmp(&buffer[4], "/cmd_log", 8)) {
 					printf("Request cmd_log\n");
 					if (!authenticated)

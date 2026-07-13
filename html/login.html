@@ -67,7 +67,7 @@ button:hover{filter:brightness(1.1)}
       <rect x="2" y="7" width="20" height="10" rx="2"/>
       <path d="M6 11v2M10 11v2M14 11v2M18 11v2"/>
     </svg>
-    <h1>Switch Login</h1>
+    <h1 id="hn">Switch Login</h1>
   </div>
   <p class="sub">RTLPlayground management interface</p>
   <form method="post" action="login">
@@ -81,6 +81,14 @@ button:hover{filter:brightness(1.1)}
 <script>
 if(document.referrer.endsWith("login.html"))
   document.getElementById("err").textContent="Wrong password — try again.";
+/* identify the device: /hostname is served without authentication */
+fetch("/hostname").then(function(r){return r.ok?r.text():""}).then(function(t){
+  t=t.trim();
+  if(t){
+    document.getElementById("hn").textContent=t;
+    document.title=t+" · Login";
+  }
+}).catch(function(){});
 </script>
 </body>
 </html>

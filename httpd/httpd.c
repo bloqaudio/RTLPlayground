@@ -688,6 +688,12 @@ void httpd_appcall(void)
 		entry = find_entry(q);
 		dbg_string("Entry is: "); dbg_byte(entry); dbg_char('\n');
 		if (entry == 0xff) {
+			// Served without authentication so the login page can
+			// identify the device
+			if (!strcmp(q, "/hostname")) {
+				send_hostname();
+				goto do_send;
+			}
 			if (!authenticated) {
 				dbg_string("Not authorized!\n");
 				send_unauthorized();
