@@ -14,6 +14,7 @@
 #include "rtl837x_phy.h"
 #include "phy.h"
 #include "machine.h"
+#include "debug.h"
 
 #pragma codeseg BANK1
 #pragma constseg BANK1
@@ -311,7 +312,7 @@ void vlan_setup(void) __banked
  */
 uint8_t port_l2_forget(void) __banked
 {
-	print_string("\nport_l2_forget called\n");
+	dbg_string("\nport_l2_forget called\n");
 	// Configure the entries to be flushed:
 	// port-based (bits 0-1 are 0 and dynamic entries, bit 2 specifies dynamic entries
 	REG_SET(RTL837x_L2_TBL_FLUSH_CNF, 0x0);
@@ -324,7 +325,7 @@ uint8_t port_l2_forget(void) __banked
 		reg_read_m(RTL837x_L2_TBL_FLUSH_CTRL);
 	} while (sfr_data[1]);
 
-	print_string("port_l2_forget done\n");
+	dbg_string("port_l2_forget done\n");
 	return 0;
 }
 

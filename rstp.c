@@ -425,7 +425,10 @@ void rstp_rx(uint8_t port) __banked
 		o->send_rstp = 0;
 		o->tc_ack = 1;
 		o->new_info = 1;
-		tc_detected(port);
+		if (!o->tc_while) {
+			o->tc_while = T_TC;
+			tc_detected(port);
+		}
 		return;
 	}
 
@@ -482,8 +485,13 @@ void rstp_rx(uint8_t port) __banked
 		}
 	}
 
-	if (b->flags & RSTP_F_TC)
+	/* Edge-triggered: a peer keeps the TC flag set for several
+	 * consecutive BPDUs; flush only when a TC window is not already
+	 * running on this port, or a BPDU storm becomes a flush storm */
+	if ((b->flags & RSTP_F_TC) && !o->tc_while) {
+		o->tc_while = T_TC;
 		tc_detected(port);
+	}
 	if ((b->flags & RSTP_F_TCACK) && o->role == RSTP_R_ROOT)
 		tcn_pending = 0;
 }

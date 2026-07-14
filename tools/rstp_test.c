@@ -252,6 +252,7 @@ static void t_tc(void)
 	rstp_link(0, RSTP_LINK_UP | 2);
 	rstp_link(1, RSTP_LINK_UP | 2);
 	ticks_n(2 * T_FWD_DELAY);	/* both forwarding */
+	ticks_n(T_TC + 1);		/* drain our own transition-TC windows */
 	flush_count = 0;
 	int before = txn;
 	mkvec(v, 0x9000, MAC_PEER, 0, 0x9000, MAC_PEER, 0x8001);
