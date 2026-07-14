@@ -144,6 +144,10 @@ function stpLoad(){
     var st=stpParse(body);
     var en=$("stpen");
     if(document.activeElement!==en)en.checked=st.on;
+    /* sync the priority select from the live bridge id (hi nibble x 4096) */
+    var ps=$("stpprio");
+    if(st.on&&st.bridge&&document.activeElement!==ps)
+      ps.value=String(parseInt(st.bridge.slice(0,1),16));
     $("stpids").textContent=!st.on?"RSTP is disabled — all ports forward."
       :"Bridge "+st.bridge+(st.root
         ?(" · Root "+st.root+(st.via?" via port "+st.via:" (this bridge)")):"");

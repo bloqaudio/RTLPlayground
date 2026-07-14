@@ -1665,7 +1665,8 @@ void cmd_parser(void) __banked
 			} else if (cmd_compare(1, "prio") && cmd_words_len == 3) {
 				// stp prio <0-15>, bridge priority in 4096 steps
 				__xdata uint16_t prio;
-				if (!atoi_short(&prio, cmd_words_b[2]) || prio > 15) {
+				// atoi_short returns nonzero on ERROR
+				if (atoi_short(&prio, cmd_words_b[2]) || prio > 15) {
 					print_string("prio: 0-15\n");
 					err_status = ERR_INVALID_ARG;
 				} else {
