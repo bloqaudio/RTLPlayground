@@ -122,6 +122,10 @@ struct flash_region_t {
 extern __xdata char port_names[9][PORT_NAME_SIZE];
 extern __xdata char hostname[HOSTNAME_MAX_LEN + 1];
 
+// Set to request a gratuitous ARP from the main loop (announces and
+// re-learns the CPU's own MAC after L2 flushes)
+extern __xdata uint8_t garp_pending;
+
 // While set to 1, write_char() also appends console output to the HTTP
 // response in outbuf/slen (POST /cmd); becomes 2 once the buffer is full
 extern __xdata uint8_t cmd_capture;

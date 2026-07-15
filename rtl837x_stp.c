@@ -51,6 +51,18 @@ static const uint8_t speed_class_map[8] = {0, 1, 2, 2, 5, 3, 4, 4};
 /* callbacks the core needs                                            */
 /* ------------------------------------------------------------------ */
 
+/* raw 2-bit field write into the MSTP states register */
+static void mstp_write(uint8_t port, uint8_t hw)
+{
+	static __xdata uint8_t idx, sh;
+	idx = 3 - (port >> 2);
+	sh = (port << 1) & 0x7;
+	reg_read_m(RTL837X_MSTP_STATES);
+	sfr_data[idx] = (sfr_data[idx] & ~(0b11 << sh)) | (hw << sh);
+	sfr_data[1] |= 0x0c;	/* CPU port (9) stays forwarding */
+	reg_write_m(RTL837X_MSTP_STATES);
+}
+
 void rstp_platform_state(uint8_t port, uint8_t state)
 {
 	/* 2-bit fields. Bench-measured on the RTL8373N: only 00 truly
@@ -60,18 +72,10 @@ void rstp_platform_state(uint8_t port, uint8_t state)
 	 * the CPU in state 00 (verified: an Alternate port keeps its
 	 * role). Learning maps to 00 too: 10 is untested and the risk
 	 * of it flooding like 01 outweighs the lost learn phase. */
-	static __xdata uint8_t hw, idx, sh;
-	hw = state == RSTP_S_FORWARDING ? 0b11 : 0b00;
-	idx = 3 - (port >> 2);
-	sh = (port << 1) & 0x7;
-
-	reg_read_m(RTL837X_MSTP_STATES);
-	sfr_data[idx] = (sfr_data[idx] & ~(0b11 << sh)) | (hw << sh);
-	sfr_data[1] |= 0x0c;	/* CPU port (9) stays forwarding */
-	reg_write_m(RTL837X_MSTP_STATES);
+	mstp_write(port, state == RSTP_S_FORWARDING ? 0b11 : 0b00);
 #ifdef DEBUG
 	print_string("STP state port "); print_byte(port);
-	print_string(" -> "); print_byte(hw); write_char('\n');
+	print_string(" -> "); print_byte(state); write_char('\n');
 #endif
 }
 
@@ -128,11 +132,25 @@ void rstp_platform_tx(uint8_t port)
 		}
 	}
 	/* BPDUs are untagged link-local frames: keep tcpip_output() from
-	 * inserting the management-VLAN 802.1Q tag */
+	 * inserting the management-VLAN 802.1Q tag.  And a port held in
+	 * hardware state 00 blocks CPU-injected frames too, so lift it
+	 * to the leaky listening state (01) just for this transmit -
+	 * designated ports must send hellos/proposals WHILE discarding
+	 * or two of these switches can never elect roles between
+	 * themselves (deaf-and-mute oscillation). */
+	static __xdata uint8_t lifted;
+	lifted = 0;
+	if (rstp_ports[port].state != RSTP_S_FORWARDING
+	    && rstp_ports[port].link) {
+		mstp_write(port, 0b01);
+		lifted = 1;
+	}
 	saved_mgmt_vlan = management_vlan;
 	management_vlan = 0;
 	tcpip_output();
 	management_vlan = saved_mgmt_vlan;
+	if (lifted)
+		mstp_write(port, 0b00);
 	uip_len = 0;
 }
 

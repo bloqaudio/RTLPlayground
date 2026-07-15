@@ -333,6 +333,32 @@ uip_arp_arpin(void) __banked
 }
 /*-----------------------------------------------------------------------------------*/
 /**
+ * Build a gratuitous ARP announcement (broadcast ARP request for our
+ * own address) in uip_buf. Keeps the switch's own MAC entry alive in
+ * neighbour tables AND in its own ASIC L2 table: the CPU self-entry
+ * is a dynamic entry that ages out on an idle switch (or is wiped by
+ * any topology-change flush), and unknown unicast is not delivered to
+ * the CPU port on the RTL8373N, so a silent management CPU becomes
+ * unreachable until it transmits something.
+ */
+void uip_arp_announce(void)
+{
+  memset(BUF_O->ethhdr.dest.addr, 0xff, 6);
+  memset(BUF_O->dhwaddr.addr, 0x00, 6);
+  memcpy(BUF_O->ethhdr.src.addr, uip_ethaddr.addr, 6);
+  memcpy(BUF_O->shwaddr.addr, uip_ethaddr.addr, 6);
+  uip_ipaddr_copy(BUF_O->dipaddr, uip_hostaddr);
+  uip_ipaddr_copy(BUF_O->sipaddr, uip_hostaddr);
+  BUF_O->opcode = HTONS(ARP_REQUEST);
+  BUF_O->hwtype = HTONS(ARP_HWTYPE_ETH);
+  BUF_O->protocol = HTONS(UIP_ETHTYPE_IP);
+  BUF_O->hwlen = 6;
+  BUF_O->protolen = 4;
+  BUF_O->ethhdr.type = HTONS(UIP_ETHTYPE_ARP);
+  uip_len = sizeof(struct arp_hdr_o);
+}
+/*-----------------------------------------------------------------------------------*/
+/**
  * Prepend Ethernet header to an outbound IP packet and see if we need
  * to send out an ARP request.
  *

@@ -325,6 +325,8 @@ uint8_t port_l2_forget(void) __banked
 		reg_read_m(RTL837x_L2_TBL_FLUSH_CTRL);
 	} while (sfr_data[1]);
 
+	// the flush also erased our own CPU self-entry: re-announce asap
+	garp_pending = 1;
 	dbg_string("port_l2_forget done\n");
 	return 0;
 }

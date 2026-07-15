@@ -120,6 +120,8 @@ __xdata uint16_t management_vlan;
 __xdata uint8_t tx_seq;
 
 __xdata uint8_t stpEnabled;
+__xdata uint8_t garp_pending;
+static __xdata uint16_t last_garp;
 
 __code uint16_t bit_mask[16] = {
 	0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080,
@@ -1436,6 +1438,17 @@ void idle(void)
 	handle_rx();
 	// Check UIP for packets to transmit
 	handle_tx();
+	// Keep our own MAC entry alive (see uip_arp_announce): every 30 s
+	// while idle, and immediately after any L2 flush
+	if (idle_ready && (uip_hostaddr[0] || uip_hostaddr[1])
+	    && (garp_pending
+		|| (uint16_t)((uint16_t)ticks - last_garp) > 30 * SYS_TICK_HZ)) {
+		last_garp = (uint16_t)ticks;
+		garp_pending = 0;
+		uip_arp_announce();
+		if (uip_len)
+			tcpip_output();
+	}
 	// If STP protocol enabled, decrease STP timers to trigger actions
 	if (stpEnabled) {
 		if (!stp_clock) {
