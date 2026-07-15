@@ -2117,6 +2117,11 @@ void main(void)
 	print_reg(RTL837X_REG_SEC_COUNTER);
 #endif
 	stpEnabled = 0;
+	// xdata is NOT zeroed by the startup code: without these two lines
+	// the keepalive fires a transmit on the very first main-loop pass,
+	// before the NIC TX ring is ready, and boot wedges after "NIC reset"
+	garp_pending = 0;
+	last_garp = (uint16_t)ticks;
 	nic_setup();
 	vlan_setup();
 	port_l2_setup();
