@@ -112,9 +112,9 @@ function stpParse(body){
       st.root=m[1];
       var v=m[2].match(/via port 0?(\d+)/);
       st.via=v?v[1]:"";
-    }else if((m=l.match(/^Port 0?([1-9]): (down|([-RDAB]) ([dlF])( edge)?( stp-peer)?)/))){
+    }else if((m=l.match(/^Port 0?([1-9]): (down|([-RDAB]) ([dlF])( edge=(auto|on|off)(\*)?)?( stp-peer)?)/))){
       st.ports[m[1]]=m[2]==="down"?{down:true}
-        :{role:m[3],state:m[4],edge:!!m[5],compat:!!m[6]};
+        :{role:m[3],state:m[4],adm:m[6]||"",edge:!!m[7],compat:!!m[8]};
     }
   });
   return st;
@@ -162,6 +162,9 @@ function stpLoad(){
         +(STP_STATE[pi.state]||"?")+"</span>"
         +(pi.edge?' <span class="badge">edge</span>':"")
         +(pi.compat?' <span class="badge">stp-peer</span>':"");
+      /* reflect the configured admin edge mode in the select */
+      var es=$("stpe"+i);
+      if(es&&pi.adm&&document.activeElement!==es)es.value=pi.adm;
     });
   }).catch(function(){});
 }

@@ -287,11 +287,15 @@ void stp_status(void) __banked
 			continue;
 		}
 		/* role Root/Designated/Alternate/Backup,
-		 * state discarding/learning/Forwarding */
+		 * state discarding/learning/Forwarding; edge=<admin mode>,
+		 * trailing * when the port currently operates as edge */
 		write_char(roles[o->role]); write_char(' ');
 		write_char(states[o->state]);
+		print_string(" edge=");
+		print_string(o->admin_edge == RSTP_EDGE_ON ? "on"
+			: o->admin_edge == RSTP_EDGE_OFF ? "off" : "auto");
 		if (o->oper_edge)
-			print_string(" edge");
+			write_char('*');
 		if (!o->send_rstp)
 			print_string(" stp-peer");
 		write_char('\n');
