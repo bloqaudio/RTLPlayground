@@ -53,10 +53,15 @@ static const uint8_t speed_class_map[8] = {0, 1, 2, 2, 5, 3, 4, 4};
 
 void rstp_platform_state(uint8_t port, uint8_t state)
 {
-	/* 2-bit fields: 00 disable, 01 blocking, 10 learning, 11 fwd */
+	/* 2-bit fields. Bench-measured on the RTL8373N: only 00 truly
+	 * discards - 01 still floods and learns (it behaves like a
+	 * listening state), which lets frames leak through "blocked"
+	 * ports and poisons MAC tables fabric-wide. BPDUs still reach
+	 * the CPU in state 00 (verified: an Alternate port keeps its
+	 * role). Learning maps to 00 too: 10 is untested and the risk
+	 * of it flooding like 01 outweighs the lost learn phase. */
 	static __xdata uint8_t hw, idx, sh;
-	hw = state == RSTP_S_FORWARDING ? 0b11
-	   : state == RSTP_S_LEARNING ? 0b10 : 0b01;
+	hw = state == RSTP_S_FORWARDING ? 0b11 : 0b00;
 	idx = 3 - (port >> 2);
 	sh = (port << 1) & 0x7;
 
@@ -220,11 +225,10 @@ void stp_setup(void) __banked
 		stp_bridge_prio = 0x8000;
 	print_short(stp_bridge_prio); write_char('\n');
 
-	/* start with every data port blocking, CPU port forwarding */
+	/* start with every data port discarding (00 - see
+	 * rstp_platform_state), CPU port forwarding */
 	sfr_data[0] = sfr_data[2] = sfr_data[3] = 0;
 	sfr_data[1] = 0x0c;
-	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
-		sfr_data[3 - (i >> 2)] |= 0b01 << ((i << 1) & 0x7);
 	reg_write_m(RTL837X_MSTP_STATES);
 
 	rstp_bridge_id[0] = stp_bridge_prio >> 8;
