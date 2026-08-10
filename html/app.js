@@ -950,7 +950,7 @@ function bwLoad(){
       tr.insertCell().textContent=n;
       var icb=h("input",{type:"checkbox",id:"bwi"+n});icb.checked=iOn;
       tr.insertCell().appendChild(icb);
-      var iin=h("input",{class:"in sm",id:"bwiv"+n,type:"number",min:"0.016",max:"1048",step:"any"});
+      var iin=h("input",{class:"in sm",id:"bwiv"+n,type:"number",min:"0.016",max:"10000",step:"any"});
       if(iOn)iin.value=+iM.toFixed(3);
       tr.insertCell().appendChild(iin);
       var msel=h("select",{class:"in",id:"bwm"+n},[
@@ -961,7 +961,7 @@ function bwLoad(){
       tr.insertCell().appendChild(msel);
       var ecb=h("input",{type:"checkbox",id:"bwe"+n});ecb.checked=eOn;
       tr.insertCell().appendChild(ecb);
-      var ein=h("input",{class:"in sm",id:"bwev"+n,type:"number",min:"0.016",max:"1048",step:"any"});
+      var ein=h("input",{class:"in sm",id:"bwev"+n,type:"number",min:"0.016",max:"10000",step:"any"});
       if(eOn)ein.value=+eM.toFixed(3);
       tr.insertCell().appendChild(ein);
       tr.insertCell().appendChild(h("button",{class:"ctl",text:"Apply",onclick:function(){bwApply(n)}}));
@@ -969,21 +969,24 @@ function bwLoad(){
   });
 }
 function bwHex(mbit){
-  var steps=Math.round(mbit*1000/16);
-  if(steps<1||steps>0xffff)return null;
-  return steps.toString(16).padStart(4,"0");
+  // The bw CLI takes kbit/s and converts to 16-kbit register steps itself;
+  // sending steps here double-converts and under-limits by 16x.
+  var kbit=Math.round(mbit*1000);
+  if(kbit<16||kbit>10000000)return null;
+  var h=kbit.toString(16);
+  return h.length%2?"0"+h:h;
 }
 function bwApply(n){
   var cmds=[];
   if($("bwi"+n).checked){
     var ih=bwHex(parseFloat($("bwiv"+n).value));
-    if(!ih){toast("Ingress limit must be 0.016–1048 Mbit/s","err");return;}
+    if(!ih){toast("Ingress limit must be 0.016–10000 Mbit/s","err");return;}
     cmds.push("bw in "+n+" "+ih);
     cmds.push("bw in "+n+" "+($("bwm"+n).value==="fc"?"fc":"drop"));
   }else cmds.push("bw in "+n+" off");
   if($("bwe"+n).checked){
     var eh=bwHex(parseFloat($("bwev"+n).value));
-    if(!eh){toast("Egress limit must be 0.016–1048 Mbit/s","err");return;}
+    if(!eh){toast("Egress limit must be 0.016–10000 Mbit/s","err");return;}
     cmds.push("bw out "+n+" "+eh);
   }else cmds.push("bw out "+n+" off");
   postCmds(cmds).then(bwLoad).catch(function(){});
